@@ -275,11 +275,57 @@ function showResult(spoke) {
 
   const spokeDists = DISTANCES[spoke.id] || {};
   const assigned = spokeDists[spoke.parent];
-  if (assigned) {
-    document.getElementById('distVal').textContent = assigned.km;
+  
+  // Update Distance Card
+  const distCard = document.getElementById('distCard');
+  if (distCard) {
+    if (assigned) {
+      distCard.innerHTML = `<div class="label">Driving Distance</div><div class="value">${assigned.km}<span class="unit">km</span></div>`;
+    } else {
+      distCard.innerHTML = `<div class="label">Driving Distance</div><div class="value">—</div>`;
+    }
   } else {
-    document.getElementById('distVal').textContent = '—';
+    // Fallback if old HTML structure exists
+    document.getElementById('distVal').textContent = assigned ? assigned.km : '—';
   }
+
+  const all = Object.entries(spokeDists)
+    .map(([hubId, d]) => ({ hubId, ...d, hub: HUBS.find(h => h.id === hubId) }))
+    .filter(x => x.hub).sort((a, b) => a.km - b.km);
+
+  const nearbyList = document.getElementById('nearbyList');
+  nearbyList.innerHTML = '';
+  
+  // Take top 6 and find max distance for bar scaling
+  const displayHubs = all.slice(0, 6);
+  const maxKm = Math.max(...displayHubs.map(h => h.km), 1);
+
+  displayHubs.forEach(item => {
+    const isAssigned = item.hubId === spoke.parent;
+    const barWidth = (item.km / maxKm) * 100;
+    
+    const div = document.createElement('div');
+    div.className = 'hub-item-modern' + (isAssigned ? ' assigned' : '');
+    div.innerHTML = `
+      <div class="hub-header">
+        <div class="hub-name-modern">
+          ${isAssigned ? '<span class="assigned-badge">Assigned</span>' : ''}
+          ${item.hub.name}
+        </div>
+        <div class="hub-distance-badge">${item.km} km</div>
+      </div>
+      <div class="hub-bar-bg">
+        <div class="hub-bar-fill" style="width: ${barWidth}%;"></div>
+      </div>
+    `;
+    div.addEventListener('click', () => drawRoute(spoke, item.hub));
+    nearbyList.appendChild(div);
+  });
+  
+  highlightTableRow(spoke.id);
+  const assignedHub = HUBS.find(h => h.id === spoke.parent);
+  if (assignedHub) drawRoute(spoke, assignedHub);
+}
 
   const all = Object.entries(spokeDists)
     .map(([hubId, d]) => ({ hubId, ...d, hub: HUBS.find(h => h.id === hubId) }))

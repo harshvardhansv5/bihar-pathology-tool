@@ -2,8 +2,8 @@
 // Bihar Pathology Tool - Application Logic
 // ============================================================
 
-// OpenRouteService API Key (free, no credit card)
-// NOTE: This will be moved to a secure Cloudflare Worker in the next step.
+// OpenRouteService API Key is now securely stored in a Cloudflare Worker.
+// The frontend only communicates with the Worker proxy.
 const ORS_BASE = 'https://bihar-pathology-proxy.harshvardhansv5.workers.dev/api';
 const ORS_DIRECTIONS_URL = `${ORS_BASE}/v2/directions/driving-car/geojson`;
 const ORS_MATRIX_URL = `${ORS_BASE}/v2/matrix/driving-car`;
@@ -24,6 +24,21 @@ const LEG_COLORS = [
 function legColor(i) { return LEG_COLORS[((i % LEG_COLORS.length) + LEG_COLORS.length) % LEG_COLORS.length]; }
 
 var PRESET_ROUTES = [];
+
+// ============================================================
+// THEME TOGGLE (Ambient Dark Mode)
+// ============================================================
+const themeToggle = document.getElementById('themeToggle');
+const currentTheme = localStorage.getItem('theme') || 'light';
+document.documentElement.setAttribute('data-theme', currentTheme);
+themeToggle.textContent = currentTheme === 'dark' ? '☀️ Light' : '🌙 Dark';
+
+themeToggle.addEventListener('click', () => {
+  const newTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', newTheme);
+  localStorage.setItem('theme', newTheme);
+  themeToggle.textContent = newTheme === 'dark' ? '☀️ Light' : '🌙 Dark';
+});
 
 // ============================================================
 // MAP
@@ -62,7 +77,7 @@ legend.onAdd = function () {
     <div class="legend-item"><div class="legend-dot" style="background:#16a34a"></div>CHC</div>
     <div class="legend-item"><div class="legend-dot" style="background:#2563eb"></div>PHC</div>
     <div class="legend-item"><div class="legend-dot" style="background:#9333ea"></div>UPHC</div>
-    <div class="legend-item" style="margin-top:4px"><div style="width:16px;height:3px;background:linear-gradient(90deg,#dc2626,#16a34a,#2563eb,#ea580c);"></div><b>Route (color-coded)</b></div>
+    <div class="legend-item" style="margin-top:4px"><div style="width:16px;height:3px;background:linear-gradient(90deg,#dc2626,#16a34a,#2563eb,#ea580c);"></div><b>Route</b></div>
   `;
   return div;
 };
@@ -85,6 +100,7 @@ const hubDistanceView = document.getElementById('hubDistanceView');
 const spokeDistanceView = document.getElementById('spokeDistanceView');
 const tabsWrap = document.getElementById('tabsWrap');
 const verifyGoogleBtn = document.getElementById('verifyGoogleBtn');
+const searchGoogleBtn = document.getElementById('searchGoogleBtn');
 const globalSearch = document.getElementById('globalSearch');
 const globalResults = document.getElementById('globalResults');
 const districtSummary = document.getElementById('districtSummary');
@@ -260,15 +276,13 @@ function showResult(spoke) {
   const assigned = spokeDists[spoke.parent];
   if (assigned) {
     document.getElementById('distVal').textContent = assigned.km;
-    document.getElementById('timeVal').textContent = assigned.min;
   } else {
     document.getElementById('distVal').textContent = '—';
-    document.getElementById('timeVal').textContent = '—';
   }
 
   const all = Object.entries(spokeDists)
     .map(([hubId, d]) => ({ hubId, ...d, hub: HUBS.find(h => h.id === hubId) }))
-    .filter(x => x.hub).sort((a, b) => a.min - b.min);
+    .filter(x => x.hub).sort((a, b) => a.km - b.km);
 
   const nearbyList = document.getElementById('nearbyList');
   nearbyList.innerHTML = '';
@@ -277,7 +291,7 @@ function showResult(spoke) {
     const div = document.createElement('div');
     div.className = 'hub-item' + (isAssigned ? ' assigned' : '');
     div.innerHTML = `<div><span class="hub-name">${item.hub.name}</span>${isAssigned ? '<span class="hub-badge">Assigned</span>' : ''}</div>
-      <div class="hub-dist">${item.km} km · ${item.min} min</div>`;
+      <div class="hub-dist">${item.km} km</div>`;
     div.addEventListener('click', () => drawRoute(spoke, item.hub));
     nearbyList.appendChild(div);
   });
@@ -351,7 +365,7 @@ function buildBulkTable() {
 
   const rows = list.map(s => {
     const d = (DISTANCES[s.id] || {})[s.parent] || {};
-    return { ...s, km: d.km || 0, min: d.min || 0 };
+    return { ...s, km: d.km || 0 };
   });
 
   const { key, dir } = currentTableSort;
@@ -375,7 +389,7 @@ function buildBulkTable() {
     const tr = document.createElement('tr');
     tr.dataset.spokeId = r.id;
     if (currentSpoke && currentSpoke.id === r.id) tr.classList.add('selected');
-    tr.innerHTML = `<td>${r.name}</td><td><span class="badge badge-${r.type}">${r.type}</span></td><td>${r.block || ''}</td><td class="dist-cell">${r.km} km</td><td class="time-cell">${r.min} min</td>`;
+    tr.innerHTML = `<td>${r.name}</td><td><span class="badge badge-${r.type}">${r.type}</span></td><td>${r.block || ''}</td><td class="dist-cell">${r.km} km</td>`;
     tr.addEventListener('click', () => { const spoke = SPOKES.find(s => s.id === r.id); if (spoke) showResult(spoke); });
     body.appendChild(tr);
   });
@@ -416,10 +430,8 @@ function switchTab(name) {
 function hideSummary() { districtSummary.classList.remove('show'); }
 
 function showHubSummary(hub, spokes) {
-  const dists = spokes.map(s => (DISTANCES[s.id] || {})[hub.id] || { km: 0, min: 0 });
+  const dists = spokes.map(s => (DISTANCES[s.id] || {})[hub.id] || { km: 0 });
   const avgKm = (dists.reduce((a, d) => a + d.km, 0) / dists.length).toFixed(1);
-  const avgMin = Math.round(dists.reduce((a, d) => a + d.min, 0) / dists.length);
-  const riskyCount = dists.filter(d => d.min > 60).length;
   const minIdx = dists.map(d => d.km).indexOf(Math.min(...dists.map(d => d.km)));
   const maxIdx = dists.map(d => d.km).indexOf(Math.max(...dists.map(d => d.km)));
 
@@ -427,8 +439,6 @@ function showHubSummary(hub, spokes) {
   document.getElementById('dsStats').innerHTML = `
     <div><div class="ds-stat-label">Spokes</div><div class="ds-stat-value">${spokes.length}</div></div>
     <div><div class="ds-stat-label">Avg Distance</div><div class="ds-stat-value">${avgKm} km</div></div>
-    <div><div class="ds-stat-label">Avg Time</div><div class="ds-stat-value">${avgMin} min</div></div>
-    <div><div class="ds-stat-label">Risky (&gt;60min)</div><div class="ds-stat-value ${riskyCount > 0 ? 'warn' : ''}">${riskyCount}</div></div>
   `;
   document.getElementById('dsExtra').innerHTML =
     `<b>Closest:</b> ${spokes[minIdx].name} (${dists[minIdx].km} km) &nbsp;·&nbsp; <b>Farthest:</b> ${spokes[maxIdx].name} (${dists[maxIdx].km} km)`;
@@ -436,13 +446,20 @@ function showHubSummary(hub, spokes) {
 }
 
 // ============================================================
-// VERIFY BUTTON
+// VERIFY / SEARCH BUTTONS
 // ============================================================
 verifyGoogleBtn.addEventListener('click', () => {
   if (!currentSpoke) return;
   const hub = HUBS.find(h => h.id === currentSpoke.parent);
   if (!hub) return;
   window.open(`https://www.google.com/maps/dir/?api=1&origin=${hub.lat},${hub.lng}&destination=${currentSpoke.lat},${currentSpoke.lng}&travelmode=driving`, '_blank');
+});
+
+searchGoogleBtn.addEventListener('click', () => {
+  if (!currentSpoke) return;
+  // Search by name + block + district for better accuracy
+  const query = encodeURIComponent(`${currentSpoke.name} ${currentSpoke.block || ''} ${currentSpoke.district} Bihar`);
+  window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, '_blank');
 });
 
 // ============================================================
@@ -488,7 +505,7 @@ async function renderHubDistances() {
         locations: HUBS.map(h => [h.lng, h.lat]),
         sources: [selectedIdx],
         destinations: destinations,
-        metrics: ['distance', 'duration'],
+        metrics: ['distance'],
         units: 'km',
       }),
     });
@@ -497,12 +514,10 @@ async function renderHubDistances() {
     const data = await r.json();
 
     const distances = data.distances[0];
-    const durations = data.durations[0];
 
     const rows = destinations.map((destIdx, i) => ({
       hub: HUBS[destIdx],
       km: distances[i] !== null ? distances[i] : null,
-      min: durations[i] !== null ? durations[i] : null,
     })).filter(r => r.km !== null)
        .sort((a, b) => a.km - b.km);
 
@@ -513,16 +528,15 @@ async function renderHubDistances() {
     statusEl.textContent = 'ORS unavailable — trying OSRM…';
     try {
       const coords = HUBS.map(h => `${h.lng},${h.lat}`).join(';');
-      const url = `https://router.project-osrm.org/table/v1/driving/${coords}?sources=${selectedIdx}&annotations=distance,duration`;
+      const url = `https://router.project-osrm.org/table/v1/driving/${coords}?sources=${selectedIdx}&annotations=distance`;
       const r = await fetch(url);
       if (!r.ok) throw new Error('OSRM table HTTP ' + r.status);
       const data = await r.json();
       if (data.code !== 'Ok') throw new Error('OSRM code: ' + data.code);
 
       const dists = data.distances[0];
-      const durs = data.durations[0];
 
-      const rows = HUBS.map((h, i) => ({ hub: h, km: dists[i] / 1000, min: durs[i] / 60 }))
+      const rows = HUBS.map((h, i) => ({ hub: h, km: dists[i] / 1000 }))
         .filter(r => r.hub.id !== selectedHub.id && !isNaN(r.km))
         .sort((a, b) => a.km - b.km);
 
@@ -541,7 +555,7 @@ function renderHubDistanceRows(allRows) {
   statusEl.textContent = '';
 
   if (!allRows || !allRows.length) {
-    listEl.innerHTML = '<div style="text-align:center;color:#a0aec0;padding:14px;">No data available.</div>';
+    listEl.innerHTML = '<div style="text-align:center;color:var(--text-sub);padding:14px;">No data available.</div>';
     return;
   }
 
@@ -558,13 +572,12 @@ function renderHubDistanceRows(allRows) {
       <div style="display:flex; align-items:center; gap:12px;">
         <span class="hd-rank ${rankClass}">${i + 1}</span>
         <div style="flex:1; min-width:0;">
-          <div style="font-weight:600; color:#1a365d; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.hub.name}</div>
-          <div style="font-size:11px; color:#718096; margin-top:2px;">${r.hub.district}</div>
+          <div style="font-weight:600; color:var(--text-main); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.hub.name}</div>
+          <div style="font-size:11px; color:var(--text-sub); margin-top:2px;">${r.hub.district}</div>
           <div class="hd-bar"><div class="hd-bar-fill" style="width:${barWidth}%;"></div></div>
         </div>
         <div style="text-align:right; flex-shrink:0;">
-          <div style="font-weight:700; color:#1a365d; font-size:15px;">${r.km.toFixed(1)} km</div>
-          <div style="font-size:11px; color:#4a5568;">${formatTime(Math.round(r.min))}</div>
+          <div style="font-weight:700; color:var(--text-main); font-size:15px;">${r.km.toFixed(1)} km</div>
           <button class="hd-verify-btn" type="button" data-lat="${r.hub.lat}" data-lng="${r.hub.lng}" data-name="${r.hub.name.replace(/"/g, '&quot;')}">🔍 Verify</button>
         </div>
       </div>
@@ -630,7 +643,6 @@ function renderSpokeDistances() {
     toSel.add(new Option(`${s.name} (${s.type})`, s.id));
   });
 
-  // Restore previous selection if still valid
   if (fromVal && districtSpokes.find(s => s.id === fromVal)) fromSel.value = fromVal;
   else if (currentSpoke && currentSpoke.district === district) {
     const opt = fromSel.querySelector(`option[value="${currentSpoke.id}"]`);
@@ -639,14 +651,6 @@ function renderSpokeDistances() {
 
   if (toVal && districtSpokes.find(s => s.id === toVal)) toSel.value = toVal;
 }
-
-document.getElementById('spokeSwapBtn').addEventListener('click', () => {
-  const fromSel = document.getElementById('spokeFromSelect');
-  const toSel = document.getElementById('spokeToSelect');
-  const tmp = fromSel.value;
-  fromSel.value = toSel.value;
-  toSel.value = tmp;
-});
 
 document.getElementById('spokeCalcBtn').addEventListener('click', async () => {
   const fromId = document.getElementById('spokeFromSelect').value;
@@ -677,7 +681,7 @@ document.getElementById('spokeCalcBtn').addEventListener('click', async () => {
     } catch (e) { /* fall through */ }
   }
 
-  resultEl.innerHTML = '<div style="color:#7c3aed; padding:12px; font-size:13px;">Calculating…</div>';
+  resultEl.innerHTML = '<div style="color:var(--accent-purple); padding:12px; font-size:13px;">Calculating…</div>';
 
   try {
     const r = await fetch(ORS_DIRECTIONS_URL, {
@@ -698,7 +702,6 @@ document.getElementById('spokeCalcBtn').addEventListener('click', async () => {
 
     const result = {
       km: summary.distance.toFixed(1),
-      min: Math.round(summary.duration / 60),
       geometry: feature.geometry.coordinates,
       source: 'ors',
     };
@@ -707,10 +710,8 @@ document.getElementById('spokeCalcBtn').addEventListener('click', async () => {
   } catch (e) {
     console.warn('ORS failed, using Haversine fallback:', e);
     const d = haversineLocal(fromSpoke.lat, fromSpoke.lng, toSpoke.lat, toSpoke.lng) * 1.3;
-    const m = Math.round(d / 30 * 60);
     applySpokeDistance({
       km: d.toFixed(1),
-      min: m,
       geometry: [[fromSpoke.lng, fromSpoke.lat], [toSpoke.lng, toSpoke.lat]],
       source: 'approximate',
     }, fromSpoke, toSpoke);
@@ -727,20 +728,16 @@ function applySpokeDistance(result, fromSpoke, toSpoke) {
 
   resultEl.innerHTML = `
     <div class="route-totals">
-      <div style="font-size:11px; text-transform:uppercase; color:#4a5568; font-weight:600; margin-bottom:10px; letter-spacing:.4px;">
+      <div style="font-size:11px; text-transform:uppercase; color:var(--text-sub); font-weight:600; margin-bottom:10px; letter-spacing:.4px;">
         Route
       </div>
-      <div style="font-weight:600; color:#1a365d; font-size:13px; margin-bottom:4px;">${fromSpoke.name}</div>
-      <div style="font-size:11px; color:#718096; margin-bottom:10px;">↓</div>
-      <div style="font-weight:600; color:#1a365d; font-size:13px; margin-bottom:10px;">${toSpoke.name}</div>
+      <div style="font-weight:600; color:var(--text-main); font-size:13px; margin-bottom:4px;">${fromSpoke.name}</div>
+      <div style="font-size:11px; color:var(--text-sub); margin-bottom:10px;">↓</div>
+      <div style="font-weight:600; color:var(--text-main); font-size:13px; margin-bottom:10px;">${toSpoke.name}</div>
       <div class="route-totals-grid">
         <div>
           <div class="route-totals-label">Distance</div>
           <div class="route-totals-value">${result.km} km</div>
-        </div>
-        <div>
-          <div class="route-totals-label">Time</div>
-          <div class="route-totals-value">${formatTime(result.min)}</div>
         </div>
       </div>
       ${sourceLabel}
@@ -759,7 +756,7 @@ function drawSpokeToSpokeRoute(geojsonCoords, fromSpoke, toSpoke) {
   const path = convertOrsGeometry(geojsonCoords);
 
   const line = L.polyline(path, {
-    color: '#7c3aed',
+    color: 'var(--accent-purple)',
     weight: 6,
     opacity: 0.9,
     lineJoin: 'round',
@@ -814,7 +811,7 @@ function renderRoute() {
   const presetWrap = document.getElementById('presetRoutesWrap');
   const presets = PRESET_ROUTES.filter(p => p.hubId === selectedHub.id);
   if (presets.length) {
-    presetWrap.innerHTML = '<div style="font-size:10px; text-transform:uppercase; color:#4a5568; font-weight:600; margin-bottom:6px;">⭐ Quick Start</div>' +
+    presetWrap.innerHTML = '<div style="font-size:10px; text-transform:uppercase; color:var(--text-sub); font-weight:600; margin-bottom:6px;">⭐ Quick Start</div>' +
       presets.map((p, i) => `<span class="preset-chip" data-preset-idx="${i}">${p.name}</span>`).join('');
     presetWrap.querySelectorAll('.preset-chip').forEach(chip => {
       chip.addEventListener('click', () => {
@@ -832,8 +829,8 @@ function renderRoute() {
   const allSaved = JSON.parse(localStorage.getItem('savedRoutes') || '{}');
   const mine = Object.entries(allSaved).filter(([k, v]) => v.hubId === selectedHub.id);
   if (mine.length) {
-    savedWrap.innerHTML = '<div style="font-size:10px; text-transform:uppercase; color:#4a5568; font-weight:600; margin-bottom:6px;">💾 Saved Routes</div>' +
-      mine.map(([k, v]) => `<button class="saved-chip" data-key="${k}">${v.name} <span style="color:#a0aec0;">(${v.stops.length} stops)</span></button>`).join('');
+    savedWrap.innerHTML = '<div style="font-size:10px; text-transform:uppercase; color:var(--text-sub); font-weight:600; margin-bottom:6px;">💾 Saved Routes</div>' +
+      mine.map(([k, v]) => `<button class="saved-chip" data-key="${k}">${v.name} <span style="color:var(--text-sub);">(${v.stops.length} stops)</span></button>`).join('');
     savedWrap.querySelectorAll('.saved-chip').forEach(b => {
       b.addEventListener('click', () => loadRoute(b.dataset.key));
     });
@@ -850,7 +847,7 @@ function renderRoute() {
 
   listEl.innerHTML = '';
   if (routeStops.length === 0) {
-    listEl.innerHTML = '<div style="text-align:center;color:#a0aec0;font-size:12px;padding:14px;background:#fff;border-radius:8px;border:1px dashed #e2e8f0;">No stops yet. Add spokes below.</div>';
+    listEl.innerHTML = '<div style="text-align:center;color:var(--text-sub);font-size:12px;padding:14px;background:var(--panel-bg);border-radius:8px;border:1px dashed var(--border-color);">No stops yet. Add spokes below.</div>';
   } else {
     routeStops.forEach((sid, i) => {
       const s = SPOKES.find(x => x.id === sid);
@@ -863,7 +860,7 @@ function renderRoute() {
           <span class="route-num-badge" style="background:${color};">${i+1}</span>
           <div style="min-width:0;">
             <div class="hub-name" style="font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</div>
-            <div style="font-size:10px; color:#718096;">${s.type} · ${s.block || ''}</div>
+            <div style="font-size:10px; color:var(--text-sub);">${s.type} · ${s.block || ''}</div>
           </div>
         </div>
         <div class="route-btns">
@@ -908,15 +905,11 @@ document.getElementById('routeClearBtn').addEventListener('click', () => {
 // ============================================================
 async function calculateRoute() {
   const kmEl = document.getElementById('routeTotalKm');
-  const minEl = document.getElementById('routeTotalMin');
   const breakdown = document.getElementById('routeLegsBreakdown');
-  const warningEl = document.getElementById('routeShiftWarning');
 
   if (!selectedHub || routeStops.length === 0) {
     kmEl.textContent = '0 km';
-    minEl.textContent = '0 min';
     breakdown.innerHTML = '';
-    warningEl.style.display = 'none';
     clearPlannerMap();
     return;
   }
@@ -933,8 +926,7 @@ async function calculateRoute() {
   }
 
   kmEl.textContent = '…';
-  minEl.textContent = '…';
-  breakdown.innerHTML = '<div style="color:#7c3aed;">Calculating route via OpenRouteService…</div>';
+  breakdown.innerHTML = '<div style="color:var(--accent-purple);">Calculating route via OpenRouteService…</div>';
 
   try {
     const r = await fetch(ORS_DIRECTIONS_URL, {
@@ -957,8 +949,7 @@ async function calculateRoute() {
 
     const result = {
       totalKm: summary.distance.toFixed(1),
-      totalMin: Math.round(summary.duration / 60),
-      legs: segments.map(s => ({ km: s.distance.toFixed(1), min: Math.round(s.duration / 60) })),
+      legs: segments.map(s => ({ km: s.distance.toFixed(1) })),
       geometry: feature.geometry.coordinates,
       way_points: feature.properties.way_points,
       source: 'ors',
@@ -984,8 +975,7 @@ async function calculateRoute() {
 
         const result = {
           totalKm: (route.distance / 1000).toFixed(1),
-          totalMin: Math.round(route.duration / 60),
-          legs: route.legs.map(l => ({ km: (l.distance / 1000).toFixed(1), min: Math.round(l.duration / 60) })),
+          legs: route.legs.map(l => ({ km: (l.distance / 1000).toFixed(1) })),
           geometry: geometry,
           way_points: wayPoints,
           source: 'osrm-fallback',
@@ -999,18 +989,15 @@ async function calculateRoute() {
     console.warn('OSRM also failed, using Haversine fallback', e);
   }
 
-  let totalKm = 0, totalMin = 0;
+  let totalKm = 0;
   const legs = [];
   for (let i = 0; i < points.length - 1; i++) {
     const d = haversineLocal(points[i].lat, points[i].lng, points[i+1].lat, points[i+1].lng) * 1.3;
-    const m = Math.round(d / 30 * 60);
     totalKm += d;
-    totalMin += m;
-    legs.push({ km: d.toFixed(1), min: m });
+    legs.push({ km: d.toFixed(1) });
   }
   applyRouteResult({
     totalKm: totalKm.toFixed(1),
-    totalMin,
     legs,
     geometry: points.map(p => [p.lng, p.lat]),
     way_points: points.map((_, i) => i),
@@ -1020,12 +1007,9 @@ async function calculateRoute() {
 
 function applyRouteResult(result, points) {
   const kmEl = document.getElementById('routeTotalKm');
-  const minEl = document.getElementById('routeTotalMin');
   const breakdown = document.getElementById('routeLegsBreakdown');
-  const warningEl = document.getElementById('routeShiftWarning');
 
   kmEl.textContent = `${result.totalKm} km`;
-  minEl.textContent = formatTime(result.totalMin);
 
   let sourceLabel = '';
   if (result.approximate) {
@@ -1042,26 +1026,9 @@ function applyRouteResult(result, points) {
     const color = legColor(i);
     return `<div style="display:flex; align-items:center; gap:6px;">
       <span style="display:inline-block; width:14px; height:4px; background:${color}; border-radius:2px; flex-shrink:0;"></span>
-      <span>${i+1}. ${shorten(from.name)} → ${shorten(to.name)}: <b>${leg.km} km · ${formatTime(leg.min)}</b></span>
+      <span>${i+1}. ${shorten(from.name)} → ${shorten(to.name)}: <b>${leg.km} km</b></span>
     </div>`;
   }).join('') + sourceLabel;
-
-  const shiftLimit = 8 * 60;
-  if (result.totalMin > shiftLimit) {
-    warningEl.style.display = 'block';
-    warningEl.style.background = '#fff5f5';
-    warningEl.style.borderLeft = '4px solid #e53e3e';
-    warningEl.style.color = '#742a2a';
-    warningEl.innerHTML = `⚠️ <b>Exceeds 8-hour shift</b> by ${formatTime(result.totalMin - shiftLimit)}. Consider splitting or removing stops.`;
-  } else if (result.totalMin > shiftLimit * 0.85) {
-    warningEl.style.display = 'block';
-    warningEl.style.background = '#fffaf0';
-    warningEl.style.borderLeft = '4px solid #dd6b20';
-    warningEl.style.color = '#7b341e';
-    warningEl.innerHTML = `🟡 Close to shift limit. Only ${formatTime(shiftLimit - result.totalMin)} of buffer left.`;
-  } else {
-    warningEl.style.display = 'none';
-  }
 
   window.__lastWayPoints = result.way_points || null;
   drawPlannerRoute(result.geometry, points);
@@ -1069,13 +1036,6 @@ function applyRouteResult(result, points) {
 
 function shorten(name) {
   return name.length > 26 ? name.slice(0, 24) + '…' : name;
-}
-
-function formatTime(mins) {
-  if (mins < 60) return `${mins} min`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m === 0 ? `${h} hr` : `${h} hr ${m} min`;
 }
 
 function haversineLocal(lat1, lng1, lat2, lng2) {
@@ -1126,7 +1086,7 @@ function drawPlannerRoute(geojsonCoords, points) {
     }
   } else {
     plannerRouteLine = L.polyline(path, {
-      color: '#7c3aed', weight: 5, opacity: 0.9, lineJoin: 'round',
+      color: 'var(--accent-purple)', weight: 5, opacity: 0.9, lineJoin: 'round',
     }).addTo(map);
   }
 
@@ -1293,7 +1253,6 @@ document.getElementById('routePrintBtn').addEventListener('click', () => {
 
   const points = [selectedHub, ...routeStops.map(id => SPOKES.find(s => s.id === id)), selectedHub];
   const totalKm = document.getElementById('routeTotalKm').textContent;
-  const totalMin = document.getElementById('routeTotalMin').textContent;
 
   const printWin = window.open('', '_blank');
   const dateStr = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -1319,7 +1278,7 @@ document.getElementById('routePrintBtn').addEventListener('click', () => {
       <b>Date:</b> ${dateStr}<br>
       <b>Hub:</b> ${selectedHub.name}<br>
       <b>District:</b> ${selectedHub.district}<br>
-      <b>Total Stops:</b> ${routeStops.length} spokes + hub &nbsp;·&nbsp; <b>Total Distance:</b> ${totalKm} &nbsp;·&nbsp; <b>Estimated Time:</b> ${totalMin}
+      <b>Total Stops:</b> ${routeStops.length} spokes + hub &nbsp;·&nbsp; <b>Total Distance:</b> ${totalKm}
     </div>
     <table>
       <thead><tr><th style="width:50px;">#</th><th>Facility</th><th style="width:70px;">Type</th><th style="width:130px;">Block</th><th style="width:60px;">Samples</th></tr></thead>

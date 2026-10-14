@@ -28,8 +28,13 @@
 </head>
 <body>
 <div class="container">
-  <h1>🧪 Bihar Pathology Tool</h1>
-  <p class="subtitle">Search any facility, or select district → hub → spoke.</p>
+  <header class="app-header">
+    <div>
+      <h1>🧪 Bihar Pathology Tool</h1>
+      <p class="subtitle">Search any facility, or select district → hub → spoke.</p>
+    </div>
+    <button id="themeToggle" class="theme-toggle" title="Toggle Dark Mode">🌙 Dark</button>
+  </header>
 
   <div class="global-search-wrap">
     <label for="globalSearch">🔍 Search any spoke across all 38 districts</label>
@@ -83,19 +88,16 @@
       <div id="detailsView" style="display:none">
         <div class="result-row">
           <div class="result-headline">Selected Spoke</div>
-          <div id="spokeTitle" style="font-size:15px;font-weight:600;color:#1a365d;margin-top:2px"></div>
+          <div id="spokeTitle" style="font-size:15px;font-weight:600;color:var(--text-main);margin-top:2px"></div>
         </div>
         <hr class="divider">
         <div class="result-row">
           <div class="result-headline">Driving Distance</div>
           <div class="result-value"><span id="distVal">—</span> <span class="result-unit">km</span></div>
         </div>
-        <div class="result-row">
-          <div class="result-headline">Driving Time</div>
-          <div class="result-value"><span id="timeVal">—</span> <span class="result-unit">min</span></div>
-        </div>
         <div class="btn-row">
-          <button class="btn btn-google" id="verifyGoogleBtn" type="button">🔍 Verify on Google Maps</button>
+          <button class="btn btn-google" id="verifyGoogleBtn" type="button">🔍 Get Directions</button>
+          <button class="btn btn-google" id="searchGoogleBtn" type="button">📍 Search Location</button>
         </div>
         <hr class="divider">
         <div class="nearby-title">📍 Nearby hubs to this spoke</div>
@@ -112,7 +114,6 @@
                 <th data-sort="type">Type <span class="sort-arrow">↕</span></th>
                 <th data-sort="block">Block <span class="sort-arrow">↕</span></th>
                 <th data-sort="km">Distance <span class="sort-arrow">↕</span></th>
-                <th data-sort="min">Time <span class="sort-arrow">↕</span></th>
               </tr>
             </thead>
             <tbody id="bulkTableBody"></tbody>
@@ -136,7 +137,7 @@
 
         <div class="route-card">
           <div class="route-card-label">Add a spoke to the route</div>
-          <select id="routeAddSelect" style="width:100%; padding:9px; border:2px solid #e2e8f0; border-radius:8px; font-size:13px;">
+          <select id="routeAddSelect" style="width:100%; padding:9px; border:2px solid var(--border-color); border-radius:8px; font-size:13px; background: var(--panel-bg); color: var(--text-main);">
             <option value="">— Select a spoke —</option>
           </select>
         </div>
@@ -154,13 +155,8 @@
               <div class="route-totals-label">Total Distance</div>
               <div class="route-totals-value" id="routeTotalKm">0 km</div>
             </div>
-            <div>
-              <div class="route-totals-label">Total Time</div>
-              <div class="route-totals-value" id="routeTotalMin">0 min</div>
-            </div>
           </div>
           <div class="leg-breakdown" id="routeLegsBreakdown"></div>
-          <div class="shift-warning" id="routeShiftWarning"></div>
         </div>
 
         <div class="btn-row" style="margin-top:12px;">
@@ -172,32 +168,31 @@
 
       <div id="hubDistanceView" style="display:none">
         <div class="nearby-title">Nearest Hub Labs</div>
-        <div id="hubDistanceInfo" style="font-size:12px; color:#718096; margin-bottom:12px;"></div>
-        <div id="hubDistanceStatus" style="text-align:center; padding:20px; color:#7c3aed; font-size:13px;"></div>
+        <div id="hubDistanceInfo" style="font-size:12px; color:var(--text-sub); margin-bottom:12px;"></div>
+        <div id="hubDistanceStatus" style="text-align:center; padding:20px; color:var(--accent-purple); font-size:13px;"></div>
         <div id="hubDistanceList"></div>
       </div>
 
       <div id="spokeDistanceView" style="display:none">
         <div class="nearby-title">Spoke-to-Spoke Distance</div>
-        <div id="spokeDistInfo" style="font-size:12px; color:#718096; margin-bottom:12px;"></div>
+        <div id="spokeDistInfo" style="font-size:12px; color:var(--text-sub); margin-bottom:12px;"></div>
 
         <div class="route-card">
           <div class="route-card-label">From</div>
-          <select id="spokeFromSelect" style="width:100%; padding:9px; border:2px solid #e2e8f0; border-radius:8px; font-size:13px;">
+          <select id="spokeFromSelect" style="width:100%; padding:9px; border:2px solid var(--border-color); border-radius:8px; font-size:13px; background: var(--panel-bg); color: var(--text-main);">
             <option value="">— Select spoke —</option>
           </select>
         </div>
 
         <div class="route-card">
           <div class="route-card-label">To</div>
-          <select id="spokeToSelect" style="width:100%; padding:9px; border:2px solid #e2e8f0; border-radius:8px; font-size:13px;">
+          <select id="spokeToSelect" style="width:100%; padding:9px; border:2px solid var(--border-color); border-radius:8px; font-size:13px; background: var(--panel-bg); color: var(--text-main);">
             <option value="">— Select spoke —</option>
           </select>
         </div>
 
         <div class="btn-row" style="margin-bottom:12px;">
           <button class="btn btn-primary" id="spokeCalcBtn" type="button">Calculate Distance</button>
-          <button class="btn btn-google" id="spokeSwapBtn" type="button" title="Swap From and To">⇄ Swap</button>
         </div>
 
         <div id="spokeDistResult"></div>

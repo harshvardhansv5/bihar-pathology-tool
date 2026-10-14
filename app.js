@@ -2,66 +2,68 @@
 // Bihar Pathology Tool - Application Logic
 // ============================================================
 
-// OpenRouteService API Key is now securely stored in a Cloudflare Worker.
-// The frontend only communicates with the Worker proxy.
 const ORS_BASE = 'https://bihar-pathology-proxy.harshvardhansv5.workers.dev/api';
 const ORS_DIRECTIONS_URL = `${ORS_BASE}/v2/directions/driving-car/geojson`;
 const ORS_MATRIX_URL = `${ORS_BASE}/v2/matrix/driving-car`;
-
 const TOP_HUBS_COUNT = 5;
 
-function convertOrsGeometry(coords) {
-  return coords.map(c => [c[1], c[0]]);
-}
+function convertOrsGeometry(coords) { return coords.map(c => [c[1], c[0]]); }
 
-// ============================================================
-// Per-leg colors
-// ============================================================
 const LEG_COLORS = [
   '#dc2626', '#16a34a', '#2563eb', '#ea580c', '#9333ea',
   '#0891b2', '#ca8a04', '#db2777', '#059669', '#7c2d12',
 ];
 function legColor(i) { return LEG_COLORS[((i % LEG_COLORS.length) + LEG_COLORS.length) % LEG_COLORS.length]; }
 
-var PRESET_ROUTES = [];
-
 // ============================================================
-// THEME TOGGLE (Ambient Dark Mode)
+// THEME TOGGLE & MAP TILE SWITCHER
 // ============================================================
 const themeToggle = document.getElementById('themeToggle');
 const currentTheme = localStorage.getItem('theme') || 'light';
 document.documentElement.setAttribute('data-theme', currentTheme);
 themeToggle.textContent = currentTheme === 'dark' ? '☀️ Light' : '🌙 Dark';
 
+let map, tileLayer, markerHub, markerSpoke, routeLine, spokeMarkersLayer, plannerRouteLine, plannerMarkers = [];
+
+function initMapTiles(theme) {
+  if (tileLayer) map.removeLayer(tileLayer);
+  const url = theme === 'dark' 
+    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+    : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}';
+  
+  const attribution = theme === 'dark'
+    ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    : '© Esri, HERE, Garmin, © OpenStreetMap contributors';
+
+  tileLayer = L.tileLayer(url, { attribution, maxZoom: 19 }).addTo(map);
+}
+
+map = L.map('map').setView([25.6, 85.5], 7);
+initMapTiles(currentTheme);
+
 themeToggle.addEventListener('click', () => {
   const newTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', newTheme);
   localStorage.setItem('theme', newTheme);
   themeToggle.textContent = newTheme === 'dark' ? '☀️ Light' : '🌙 Dark';
+  initMapTiles(newTheme);
 });
 
 // ============================================================
-// MAP
+// MAP ICONS
 // ============================================================
-let map, markerHub, markerSpoke, routeLine, spokeMarkersLayer, plannerRouteLine, plannerMarkers = [];
-map = L.map('map').setView([25.6, 85.5], 7);
-L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-  attribution: '© Esri, HERE, Garmin, © OpenStreetMap contributors',
-  maxZoom: 19,
-}).addTo(map);
-
 const hubIcon = L.divIcon({
   className: '',
-  html: '<div style="background:#dc2626; width:34px; height:34px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); border:3px solid #fff; box-shadow:0 3px 8px rgba(220,38,38,.5); display:flex; align-items:center; justify-content:center;"><span style="transform:rotate(45deg); color:#fff; font-weight:800; font-size:15px; font-family:-apple-system,sans-serif;">H</span></div>',
-  iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -34],
+  html: '<div style="background:#dc2626; width:36px; height:36px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); border:3px solid #fff; box-shadow:0 4px 10px rgba(220,38,38,.5); display:flex; align-items:center; justify-content:center;"><span style="transform:rotate(45deg); color:#fff; font-weight:900; font-size:16px; font-family:-apple-system,sans-serif;">H</span></div>',
+  iconSize: [36, 36], iconAnchor: [18, 36], popupAnchor: [0, -36],
 });
 
-function makeSpokeIcon(color, size = 26, letter = 'S') {
+function makeSpokeIcon(color, size = 28, letter = 'S') {
   const anchor = size / 2;
   const fontSize = size < 30 ? 12 : 14;
   return L.divIcon({
     className: '',
-    html: `<div style="background:${color}; width:${size}px; height:${size}px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); border:2.5px solid #fff; box-shadow:0 2px 6px ${color}88; display:flex; align-items:center; justify-content:center;"><span style="transform:rotate(45deg); color:#fff; font-weight:800; font-size:${fontSize}px; font-family:-apple-system,sans-serif;">${letter}</span></div>`,
+    html: `<div style="background:${color}; width:${size}px; height:${size}px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); border:2.5px solid #fff; box-shadow:0 2px 6px ${color}88; display:flex; align-items:center; justify-content:center;"><span style="transform:rotate(45deg); color:#fff; font-weight:900; font-size:${fontSize}px; font-family:-apple-system,sans-serif;">${letter}</span></div>`,
     iconSize: [size, size], iconAnchor: [anchor, size], popupAnchor: [0, -size],
   });
 }
@@ -70,14 +72,13 @@ const legend = L.control({ position: 'bottomleft' });
 legend.onAdd = function () {
   const div = L.DomUtil.create('div', 'map-legend');
   div.innerHTML = `
-    <div class="legend-item"><div style="width:14px;height:14px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#dc2626;border:2px solid #fff;"></div><b>Hub</b></div>
-    <div class="legend-item"><div style="width:12px;height:12px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#2563eb;border:2px solid #fff;"></div><b>Spoke</b></div>
-    <div class="legend-item" style="margin-top:4px"><div class="legend-dot" style="background:#ea580c"></div>SDH</div>
+    <div class="legend-item"><div style="width:16px;height:16px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#dc2626;border:2px solid #fff;"></div><b>Hub</b></div>
+    <div class="legend-item"><div style="width:14px;height:14px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#2563eb;border:2px solid #fff;"></div><b>Spoke</b></div>
+    <div class="legend-item" style="margin-top:6px"><div class="legend-dot" style="background:#ea580c"></div>SDH</div>
     <div class="legend-item"><div class="legend-dot" style="background:#ca8a04"></div>RH</div>
     <div class="legend-item"><div class="legend-dot" style="background:#16a34a"></div>CHC</div>
     <div class="legend-item"><div class="legend-dot" style="background:#2563eb"></div>PHC</div>
     <div class="legend-item"><div class="legend-dot" style="background:#9333ea"></div>UPHC</div>
-    <div class="legend-item" style="margin-top:4px"><div style="width:16px;height:3px;background:linear-gradient(90deg,#dc2626,#16a34a,#2563eb,#ea580c);"></div><b>Route</b></div>
   `;
   return div;
 };
@@ -323,7 +324,7 @@ function drawHubAndSpokes(hub, spokes) {
   spokeMarkersLayer = L.layerGroup().addTo(map);
   spokes.forEach(s => {
     const color = typeColor(s.type);
-    const icon = makeSpokeIcon(color, 26, 'S');
+    const icon = makeSpokeIcon(color, 28, 'S');
     L.marker([s.lat, s.lng], { icon: icon })
       .addTo(spokeMarkersLayer)
       .bindPopup(`<b>${s.name}</b><br>${s.type} · ${s.block || ''}`);
@@ -343,14 +344,14 @@ function drawRoute(spoke, hub) {
   if (markerSpoke) map.removeLayer(markerSpoke);
   if (routeLine) map.removeLayer(routeLine);
 
-  const selectedIcon = makeSpokeIcon('#1d4ed8', 34, 'S');
+  const selectedIcon = makeSpokeIcon('#1d4ed8', 36, 'S');
   markerSpoke = L.marker([spoke.lat, spoke.lng], { icon: selectedIcon, zIndexOffset: 800 })
     .addTo(map)
     .bindPopup(`<b>${spoke.name}</b><br><span style="color:#1d4ed8;font-weight:600">Spoke</span>`);
 
   routeLine = L.polyline(
     [[hub.lat, hub.lng], [spoke.lat, spoke.lng]],
-    { color: '#3182ce', weight: 3, opacity: 0.75, dashArray: '6,6' }
+    { color: '#0284c7', weight: 4, opacity: 0.8, dashArray: '8,8' }
   ).addTo(map);
 }
 
@@ -457,7 +458,6 @@ verifyGoogleBtn.addEventListener('click', () => {
 
 searchGoogleBtn.addEventListener('click', () => {
   if (!currentSpoke) return;
-  // Search by name + block + district for better accuracy
   const query = encodeURIComponent(`${currentSpoke.name} ${currentSpoke.block || ''} ${currentSpoke.district} Bihar`);
   window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, '_blank');
 });
@@ -470,61 +470,32 @@ async function renderHubDistances() {
   const statusEl = document.getElementById('hubDistanceStatus');
   const infoEl = document.getElementById('hubDistanceInfo');
 
-  if (!selectedHub) {
-    statusEl.textContent = 'Select a hub first.';
-    listEl.innerHTML = '';
-    infoEl.textContent = '';
-    return;
-  }
-
+  if (!selectedHub) { statusEl.textContent = 'Select a hub first.'; listEl.innerHTML = ''; infoEl.textContent = ''; return; }
   infoEl.textContent = `From: ${selectedHub.name} (${selectedHub.district})`;
 
   const cacheKey = `hub_matrix_${selectedHub.id}`;
   const cached = localStorage.getItem(cacheKey);
-  if (cached) {
-    try {
-      const data = JSON.parse(cached);
-      renderHubDistanceRows(data);
-      return;
-    } catch (e) { /* fall through */ }
-  }
+  if (cached) { try { renderHubDistanceRows(JSON.parse(cached)); return; } catch (e) {} }
 
   statusEl.textContent = 'Calculating distances to all hubs…';
   listEl.innerHTML = '';
-
   const selectedIdx = HUBS.findIndex(h => h.id === selectedHub.id);
   const destinations = HUBS.map((_, i) => i).filter(i => i !== selectedIdx);
 
   try {
     const r = await fetch(ORS_MATRIX_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        locations: HUBS.map(h => [h.lng, h.lat]),
-        sources: [selectedIdx],
-        destinations: destinations,
-        metrics: ['distance'],
-        units: 'km',
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locations: HUBS.map(h => [h.lng, h.lat]), sources: [selectedIdx], destinations: destinations, metrics: ['distance'], units: 'km' }),
     });
-
     if (!r.ok) throw new Error('ORS matrix HTTP ' + r.status);
     const data = await r.json();
-
     const distances = data.distances[0];
-
-    const rows = destinations.map((destIdx, i) => ({
-      hub: HUBS[destIdx],
-      km: distances[i] !== null ? distances[i] : null,
-    })).filter(r => r.km !== null)
-       .sort((a, b) => a.km - b.km);
-
+    const rows = destinations.map((destIdx, i) => ({ hub: HUBS[destIdx], km: distances[i] })).filter(r => r.km !== null).sort((a, b) => a.km - b.km);
     localStorage.setItem(cacheKey, JSON.stringify(rows));
     renderHubDistanceRows(rows);
   } catch (e) {
-    console.warn('ORS matrix failed, falling back to OSRM:', e);
+    console.warn('ORS failed, OSRM fallback:', e);
     statusEl.textContent = 'ORS unavailable — trying OSRM…';
     try {
       const coords = HUBS.map(h => `${h.lng},${h.lat}`).join(';');
@@ -533,18 +504,13 @@ async function renderHubDistances() {
       if (!r.ok) throw new Error('OSRM table HTTP ' + r.status);
       const data = await r.json();
       if (data.code !== 'Ok') throw new Error('OSRM code: ' + data.code);
-
       const dists = data.distances[0];
-
-      const rows = HUBS.map((h, i) => ({ hub: h, km: dists[i] / 1000 }))
-        .filter(r => r.hub.id !== selectedHub.id && !isNaN(r.km))
-        .sort((a, b) => a.km - b.km);
-
+      const rows = HUBS.map((h, i) => ({ hub: h, km: dists[i] / 1000 })).filter(r => r.hub.id !== selectedHub.id && !isNaN(r.km)).sort((a, b) => a.km - b.km);
       localStorage.setItem(cacheKey, JSON.stringify(rows));
       renderHubDistanceRows(rows);
     } catch (err2) {
-      console.warn('OSRM matrix also failed:', err2);
-      statusEl.textContent = 'Could not fetch hub distances. Check your internet connection.';
+      console.warn('OSRM failed:', err2);
+      statusEl.textContent = 'Could not fetch hub distances. Check internet.';
     }
   }
 }
@@ -553,32 +519,24 @@ function renderHubDistanceRows(allRows) {
   const statusEl = document.getElementById('hubDistanceStatus');
   const listEl = document.getElementById('hubDistanceList');
   statusEl.textContent = '';
-
-  if (!allRows || !allRows.length) {
-    listEl.innerHTML = '<div style="text-align:center;color:var(--text-sub);padding:14px;">No data available.</div>';
-    return;
-  }
-
+  if (!allRows || !allRows.length) { listEl.innerHTML = '<div style="text-align:center;color:var(--text-sub);padding:14px;">No data available.</div>'; return; }
   const rows = allRows.slice(0, TOP_HUBS_COUNT);
   const maxKm = Math.max(...rows.map(r => r.km));
 
   listEl.innerHTML = rows.map((r, i) => {
-    let rankClass = '';
-    if (i === 0) rankClass = 'top1';
-    else if (i < 3) rankClass = 'top3';
-    else rankClass = 'top5';
+    let rankClass = i === 0 ? 'top1' : (i < 3 ? 'top3' : 'top5');
     const barWidth = Math.max(6, (r.km / maxKm) * 100);
     return `<div class="hd-row" data-hub-id="${r.hub.id}" data-hub-lat="${r.hub.lat}" data-hub-lng="${r.hub.lng}">
-      <div style="display:flex; align-items:center; gap:12px;">
+      <div style="display:flex; align-items:center; gap:14px;">
         <span class="hd-rank ${rankClass}">${i + 1}</span>
         <div style="flex:1; min-width:0;">
-          <div style="font-weight:600; color:var(--text-main); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.hub.name}</div>
-          <div style="font-size:11px; color:var(--text-sub); margin-top:2px;">${r.hub.district}</div>
+          <div style="font-weight:700; color:var(--text-main); font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.hub.name}</div>
+          <div style="font-size:12px; color:var(--text-sub); margin-top:2px;">${r.hub.district}</div>
           <div class="hd-bar"><div class="hd-bar-fill" style="width:${barWidth}%;"></div></div>
         </div>
         <div style="text-align:right; flex-shrink:0;">
-          <div style="font-weight:700; color:var(--text-main); font-size:15px;">${r.km.toFixed(1)} km</div>
-          <button class="hd-verify-btn" type="button" data-lat="${r.hub.lat}" data-lng="${r.hub.lng}" data-name="${r.hub.name.replace(/"/g, '&quot;')}">🔍 Verify</button>
+          <div style="font-weight:800; color:var(--text-main); font-size:16px;">${r.km.toFixed(1)} km</div>
+          <button class="hd-verify-btn" type="button" data-lat="${r.hub.lat}" data-lng="${r.hub.lng}">🔍 Verify</button>
         </div>
       </div>
     </div>`;
@@ -587,15 +545,11 @@ function renderHubDistanceRows(allRows) {
   listEl.querySelectorAll('.hd-row').forEach(row => {
     row.addEventListener('click', (e) => {
       if (e.target.classList.contains('hd-verify-btn')) return;
-      const hubId = row.dataset.hubId;
-      const hub = HUBS.find(h => h.id === hubId);
+      const hub = HUBS.find(h => h.id === row.dataset.hubId);
       if (!hub) return;
       districtSel.value = hub.district;
       districtSel.dispatchEvent(new Event('change'));
-      setTimeout(() => {
-        hubSel.value = hub.id;
-        hubSel.dispatchEvent(new Event('change'));
-      }, 80);
+      setTimeout(() => { hubSel.value = hub.id; hubSel.dispatchEvent(new Event('change')); }, 80);
     });
   });
 
@@ -603,10 +557,7 @@ function renderHubDistanceRows(allRows) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       if (!selectedHub) return;
-      const destLat = btn.dataset.lat;
-      const destLng = btn.dataset.lng;
-      const url = `https://www.google.com/maps/dir/?api=1&origin=${selectedHub.lat},${selectedHub.lng}&destination=${destLat},${destLng}&travelmode=driving`;
-      window.open(url, '_blank');
+      window.open(`https://www.google.com/maps/dir/?api=1&origin=${selectedHub.lat},${selectedHub.lng}&destination=${btn.dataset.lat},${btn.dataset.lng}&travelmode=driving`, '_blank');
     });
   });
 }
@@ -618,26 +569,15 @@ function renderSpokeDistances() {
   const fromSel = document.getElementById('spokeFromSelect');
   const toSel = document.getElementById('spokeToSelect');
   const infoEl = document.getElementById('spokeDistInfo');
-
   const district = districtSel.value;
-  if (!district) {
-    infoEl.textContent = 'Select a district first.';
-    fromSel.innerHTML = '<option value="">—</option>';
-    toSel.innerHTML = '<option value="">—</option>';
-    return;
-  }
+  if (!district) { infoEl.textContent = 'Select a district first.'; fromSel.innerHTML = '<option value="">—</option>'; toSel.innerHTML = '<option value="">—</option>'; return; }
 
-  const districtSpokes = SPOKES.filter(s => s.district === district)
-    .sort((a, b) => a.name.localeCompare(b.name));
-
+  const districtSpokes = SPOKES.filter(s => s.district === district).sort((a, b) => a.name.localeCompare(b.name));
   infoEl.textContent = `${districtSpokes.length} spokes in ${district} district`;
 
-  const fromVal = fromSel.value;
-  const toVal = toSel.value;
-
+  const fromVal = fromSel.value, toVal = toSel.value;
   fromSel.innerHTML = '<option value="">— Select From —</option>';
   toSel.innerHTML = '<option value="">— Select To —</option>';
-
   districtSpokes.forEach(s => {
     fromSel.add(new Option(`${s.name} (${s.type})`, s.id));
     toSel.add(new Option(`${s.name} (${s.type})`, s.id));
@@ -648,7 +588,6 @@ function renderSpokeDistances() {
     const opt = fromSel.querySelector(`option[value="${currentSpoke.id}"]`);
     if (opt) fromSel.value = currentSpoke.id;
   }
-
   if (toVal && districtSpokes.find(s => s.id === toVal)) toSel.value = toVal;
 }
 
@@ -657,14 +596,8 @@ document.getElementById('spokeCalcBtn').addEventListener('click', async () => {
   const toId = document.getElementById('spokeToSelect').value;
   const resultEl = document.getElementById('spokeDistResult');
 
-  if (!fromId || !toId) {
-    resultEl.innerHTML = '<div style="color:#c53030; font-size:13px;">Please select both a From and a To spoke.</div>';
-    return;
-  }
-  if (fromId === toId) {
-    resultEl.innerHTML = '<div style="color:#c53030; font-size:13px;">From and To must be different spokes.</div>';
-    return;
-  }
+  if (!fromId || !toId) { resultEl.innerHTML = '<div style="color:#c53030; font-size:14px;">Please select both From and To.</div>'; return; }
+  if (fromId === toId) { resultEl.innerHTML = '<div style="color:#c53030; font-size:14px;">From and To must be different.</div>'; return; }
 
   const fromSpoke = SPOKES.find(s => s.id === fromId);
   const toSpoke = SPOKES.find(s => s.id === toId);
@@ -672,112 +605,66 @@ document.getElementById('spokeCalcBtn').addEventListener('click', async () => {
 
   const cacheKey = `spoke_dist_${fromId}_${toId}`;
   const cached = localStorage.getItem(cacheKey);
+  if (cached) { try { applySpokeDistance(JSON.parse(cached), fromSpoke, toSpoke); return; } catch (e) {} }
 
-  if (cached) {
-    try {
-      const c = JSON.parse(cached);
-      applySpokeDistance(c, fromSpoke, toSpoke);
-      return;
-    } catch (e) { /* fall through */ }
-  }
-
-  resultEl.innerHTML = '<div style="color:var(--accent-purple); padding:12px; font-size:13px;">Calculating…</div>';
+  resultEl.innerHTML = '<div style="color:var(--accent-purple); padding:16px; font-size:14px; text-align:center;">Calculating…</div>';
 
   try {
     const r = await fetch(ORS_DIRECTIONS_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        coordinates: [[fromSpoke.lng, fromSpoke.lat], [toSpoke.lng, toSpoke.lat]],
-        units: 'km',
-        language: 'en',
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coordinates: [[fromSpoke.lng, fromSpoke.lat], [toSpoke.lng, toSpoke.lat]], units: 'km', language: 'en' }),
     });
     if (!r.ok) throw new Error('ORS HTTP ' + r.status);
     const data = await r.json();
     const feature = data.features[0];
-    const summary = feature.properties.summary;
-
-    const result = {
-      km: summary.distance.toFixed(1),
-      geometry: feature.geometry.coordinates,
-      source: 'ors',
-    };
+    const result = { km: feature.properties.summary.distance.toFixed(1), geometry: feature.geometry.coordinates, source: 'ors' };
     localStorage.setItem(cacheKey, JSON.stringify(result));
     applySpokeDistance(result, fromSpoke, toSpoke);
   } catch (e) {
-    console.warn('ORS failed, using Haversine fallback:', e);
+    console.warn('ORS failed, Haversine fallback:', e);
     const d = haversineLocal(fromSpoke.lat, fromSpoke.lng, toSpoke.lat, toSpoke.lng) * 1.3;
-    applySpokeDistance({
-      km: d.toFixed(1),
-      geometry: [[fromSpoke.lng, fromSpoke.lat], [toSpoke.lng, toSpoke.lat]],
-      source: 'approximate',
-    }, fromSpoke, toSpoke);
+    applySpokeDistance({ km: d.toFixed(1), geometry: [[fromSpoke.lng, fromSpoke.lat], [toSpoke.lng, toSpoke.lat]], source: 'approximate' }, fromSpoke, toSpoke);
   }
 });
 
 function applySpokeDistance(result, fromSpoke, toSpoke) {
   const resultEl = document.getElementById('spokeDistResult');
   const sourceLabel = result.source === 'ors'
-    ? '<div style="color:#16a34a; font-size:11px; margin-top:6px;">✓ Powered by OpenRouteService</div>'
-    : '<div style="color:#c05621; font-size:11px; margin-top:6px;">⚠️ Approximate (offline mode)</div>';
-
+    ? '<div style="color:#16a34a; font-size:12px; margin-top:8px; font-weight:600;">✓ Powered by OpenRouteService</div>'
+    : '<div style="color:#c05621; font-size:12px; margin-top:8px; font-weight:600;">⚠️ Approximate (offline mode)</div>';
   const gmapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${fromSpoke.lat},${fromSpoke.lng}&destination=${toSpoke.lat},${toSpoke.lng}&travelmode=driving`;
 
   resultEl.innerHTML = `
-    <div class="route-totals">
-      <div style="font-size:11px; text-transform:uppercase; color:var(--text-sub); font-weight:600; margin-bottom:10px; letter-spacing:.4px;">
-        Route
-      </div>
-      <div style="font-weight:600; color:var(--text-main); font-size:13px; margin-bottom:4px;">${fromSpoke.name}</div>
-      <div style="font-size:11px; color:var(--text-sub); margin-bottom:10px;">↓</div>
-      <div style="font-weight:600; color:var(--text-main); font-size:13px; margin-bottom:10px;">${toSpoke.name}</div>
+    <div class="route-totals" style="border-left-color: var(--accent-blue);">
+      <div style="font-size:12px; font-weight:700; text-transform:uppercase; color:var(--text-sub); margin-bottom:12px; letter-spacing:0.5px;">Route Estimate</div>
+      <div style="font-weight:700; color:var(--text-main); font-size:15px;">${fromSpoke.name}</div>
+      <div style="font-size:14px; color:var(--text-sub); margin:6px 0;">↓</div>
+      <div style="font-weight:700; color:var(--text-main); font-size:15px; margin-bottom:16px;">${toSpoke.name}</div>
       <div class="route-totals-grid">
         <div>
           <div class="route-totals-label">Distance</div>
-          <div class="route-totals-value">${result.km} km</div>
+          <div class="route-totals-value" style="font-size:32px;">${result.km} <span style="font-size:16px; font-weight:500; color:var(--text-sub);">km</span></div>
         </div>
       </div>
+      <div class="disclaimer">Estimate based on OpenRouteService. May vary from Google Maps.</div>
       ${sourceLabel}
-      <div class="btn-row" style="margin-top:10px;">
+      <div class="btn-row" style="margin-top:16px;">
         <button class="btn btn-google" type="button" onclick="window.open('${gmapsUrl}', '_blank')">🔍 Verify on Google Maps</button>
       </div>
     </div>
   `;
-
   drawSpokeToSpokeRoute(result.geometry, fromSpoke, toSpoke);
 }
 
 function drawSpokeToSpokeRoute(geojsonCoords, fromSpoke, toSpoke) {
   clearPlannerMap();
-
   const path = convertOrsGeometry(geojsonCoords);
-
-  const line = L.polyline(path, {
-    color: 'var(--accent-purple)',
-    weight: 6,
-    opacity: 0.9,
-    lineJoin: 'round',
-  }).addTo(map);
-
-  const fromIcon = makeSpokeIcon('#2563eb', 32, 'F');
-  const m1 = L.marker([fromSpoke.lat, fromSpoke.lng], { icon: fromIcon, zIndexOffset: 1000 })
-    .addTo(map)
-    .bindPopup(`<b>From:</b> ${fromSpoke.name}`);
-
-  const toIcon = makeSpokeIcon('#dc2626', 32, 'T');
-  const m2 = L.marker([toSpoke.lat, toSpoke.lng], { icon: toIcon, zIndexOffset: 1000 })
-    .addTo(map)
-    .bindPopup(`<b>To:</b> ${toSpoke.name}`);
-
+  const line = L.polyline(path, { color: '#7c3aed', weight: 6, opacity: 0.9, lineJoin: 'round' }).addTo(map);
+  const m1 = L.marker([fromSpoke.lat, fromSpoke.lng], { icon: makeSpokeIcon('#2563eb', 34, 'F'), zIndexOffset: 1000 }).addTo(map).bindPopup(`<b>From:</b> ${fromSpoke.name}`);
+  const m2 = L.marker([toSpoke.lat, toSpoke.lng], { icon: makeSpokeIcon('#dc2626', 34, 'T'), zIndexOffset: 1000 }).addTo(map).bindPopup(`<b>To:</b> ${toSpoke.name}`);
   plannerMarkers.push(line, m1, m2);
-
-  if (path.length) {
-    const bounds = L.latLngBounds(path);
-    map.fitBounds(bounds, { padding: [50, 50] });
-  }
+  if (path.length) map.fitBounds(L.latLngBounds(path), { padding: [50, 50] });
 }
 
 // ============================================================
@@ -794,10 +681,7 @@ function renderRoute() {
 
   if (!selectedHub) {
     startEl.textContent = '— Select a hub first —';
-    listEl.innerHTML = '';
-    addSel.disabled = true;
-    optimizeBtn.disabled = true;
-    saveBtn.disabled = true;
+    listEl.innerHTML = ''; addSel.disabled = true; optimizeBtn.disabled = true; saveBtn.disabled = true;
     document.getElementById('presetRoutesWrap').innerHTML = '';
     document.getElementById('savedRoutesWrap').innerHTML = '';
     return;
@@ -811,62 +695,51 @@ function renderRoute() {
   const presetWrap = document.getElementById('presetRoutesWrap');
   const presets = PRESET_ROUTES.filter(p => p.hubId === selectedHub.id);
   if (presets.length) {
-    presetWrap.innerHTML = '<div style="font-size:10px; text-transform:uppercase; color:var(--text-sub); font-weight:600; margin-bottom:6px;">⭐ Quick Start</div>' +
+    presetWrap.innerHTML = '<div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-sub); margin-bottom:8px;">⭐ Quick Start</div>' +
       presets.map((p, i) => `<span class="preset-chip" data-preset-idx="${i}">${p.name}</span>`).join('');
     presetWrap.querySelectorAll('.preset-chip').forEach(chip => {
       chip.addEventListener('click', () => {
         const p = presets[parseInt(chip.dataset.presetIdx)];
         routeStops = p.stops.slice();
-        renderRoute();
-        calculateRoute();
+        renderRoute(); calculateRoute();
       });
     });
-  } else {
-    presetWrap.innerHTML = '';
-  }
+  } else { presetWrap.innerHTML = ''; }
 
   const savedWrap = document.getElementById('savedRoutesWrap');
   const allSaved = JSON.parse(localStorage.getItem('savedRoutes') || '{}');
   const mine = Object.entries(allSaved).filter(([k, v]) => v.hubId === selectedHub.id);
   if (mine.length) {
-    savedWrap.innerHTML = '<div style="font-size:10px; text-transform:uppercase; color:var(--text-sub); font-weight:600; margin-bottom:6px;">💾 Saved Routes</div>' +
-      mine.map(([k, v]) => `<button class="saved-chip" data-key="${k}">${v.name} <span style="color:var(--text-sub);">(${v.stops.length} stops)</span></button>`).join('');
-    savedWrap.querySelectorAll('.saved-chip').forEach(b => {
-      b.addEventListener('click', () => loadRoute(b.dataset.key));
-    });
-  } else {
-    savedWrap.innerHTML = '';
-  }
+    savedWrap.innerHTML = '<div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-sub); margin-bottom:8px;">💾 Saved Routes</div>' +
+      mine.map(([k, v]) => `<button class="saved-chip" data-key="${k}">${v.name} <span style="color:var(--text-sub); font-size:12px;">(${v.stops.length} stops)</span></button>`).join('');
+    savedWrap.querySelectorAll('.saved-chip').forEach(b => b.addEventListener('click', () => loadRoute(b.dataset.key)));
+  } else { savedWrap.innerHTML = ''; }
 
   addSel.innerHTML = '<option value="">— Select a spoke —</option>';
   const t = typeFilter.value;
-  currentSpokes
-    .filter(s => !t || s.type === t)
-    .filter(s => !routeStops.includes(s.id))
-    .forEach(s => addSel.add(new Option(`${s.name} (${s.type})`, s.id)));
+  currentSpokes.filter(s => !t || s.type === t).filter(s => !routeStops.includes(s.id)).forEach(s => addSel.add(new Option(`${s.name} (${s.type})`, s.id)));
 
   listEl.innerHTML = '';
   if (routeStops.length === 0) {
-    listEl.innerHTML = '<div style="text-align:center;color:var(--text-sub);font-size:12px;padding:14px;background:var(--panel-bg);border-radius:8px;border:1px dashed var(--border-color);">No stops yet. Add spokes below.</div>';
+    listEl.innerHTML = '<div style="text-align:center;color:var(--text-sub);font-size:13px;padding:20px;background:var(--panel-bg);border-radius:12px;border:1px dashed var(--border-color);">No stops yet. Add spokes below.</div>';
   } else {
     routeStops.forEach((sid, i) => {
       const s = SPOKES.find(x => x.id === sid);
       if (!s) return;
-      const color = legColor(i);
       const row = document.createElement('div');
       row.className = 'route-stop-row';
       row.innerHTML = `
         <div style="display:flex; align-items:center; min-width:0; flex:1;">
-          <span class="route-num-badge" style="background:${color};">${i+1}</span>
+          <span class="route-num-badge" style="background:${legColor(i)};">${i+1}</span>
           <div style="min-width:0;">
-            <div class="hub-name" style="font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</div>
-            <div style="font-size:10px; color:var(--text-sub);">${s.type} · ${s.block || ''}</div>
+            <div style="font-weight:600; color:var(--text-main); font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</div>
+            <div style="font-size:11px; color:var(--text-sub);">${s.type} · ${s.block || ''}</div>
           </div>
         </div>
         <div class="route-btns">
-          <button data-action="up" data-idx="${i}" title="Move up">↑</button>
-          <button data-action="down" data-idx="${i}" title="Move down">↓</button>
-          <button class="remove" data-action="remove" data-idx="${i}" title="Remove">✕</button>
+          <button data-action="up" data-idx="${i}">↑</button>
+          <button data-action="down" data-idx="${i}">↓</button>
+          <button class="remove" data-action="remove" data-idx="${i}">✕</button>
         </div>`;
       listEl.appendChild(row);
     });
@@ -879,8 +752,7 @@ function renderRoute() {
       if (act === 'up' && idx > 0) [routeStops[idx-1], routeStops[idx]] = [routeStops[idx], routeStops[idx-1]];
       else if (act === 'down' && idx < routeStops.length - 1) [routeStops[idx+1], routeStops[idx]] = [routeStops[idx], routeStops[idx+1]];
       else if (act === 'remove') routeStops.splice(idx, 1);
-      renderRoute();
-      calculateRoute();
+      renderRoute(); calculateRoute();
     });
   });
 }
@@ -888,17 +760,11 @@ function renderRoute() {
 document.getElementById('routeAddSelect').addEventListener('change', (e) => {
   const sid = e.target.value;
   if (!sid || routeStops.includes(sid)) return;
-  routeStops.push(sid);
-  e.target.value = '';
-  renderRoute();
-  calculateRoute();
+  routeStops.push(sid); e.target.value = '';
+  renderRoute(); calculateRoute();
 });
 
-document.getElementById('routeClearBtn').addEventListener('click', () => {
-  routeStops = [];
-  renderRoute();
-  calculateRoute();
-});
+document.getElementById('routeClearBtn').addEventListener('click', () => { routeStops = []; renderRoute(); calculateRoute(); });
 
 // ============================================================
 // ROUTE CALCULATION
@@ -907,60 +773,36 @@ async function calculateRoute() {
   const kmEl = document.getElementById('routeTotalKm');
   const breakdown = document.getElementById('routeLegsBreakdown');
 
-  if (!selectedHub || routeStops.length === 0) {
-    kmEl.textContent = '0 km';
-    breakdown.innerHTML = '';
-    clearPlannerMap();
-    return;
-  }
+  if (!selectedHub || routeStops.length === 0) { kmEl.textContent = '0 km'; breakdown.innerHTML = ''; clearPlannerMap(); return; }
 
   const points = [selectedHub, ...routeStops.map(id => SPOKES.find(s => s.id === id)), selectedHub];
   const cacheKey = `route_cache_ors_${[selectedHub.id, ...routeStops].join('_')}`;
   const cached = localStorage.getItem(cacheKey);
-
-  if (cached) {
-    try {
-      applyRouteResult(JSON.parse(cached), points);
-      return;
-    } catch (e) { /* fall through */ }
-  }
+  if (cached) { try { applyRouteResult(JSON.parse(cached), points); return; } catch (e) {} }
 
   kmEl.textContent = '…';
-  breakdown.innerHTML = '<div style="color:var(--accent-purple);">Calculating route via OpenRouteService…</div>';
+  breakdown.innerHTML = '<div style="color:var(--accent-purple); text-align:center; padding:12px;">Calculating route via OpenRouteService…</div>';
 
   try {
     const r = await fetch(ORS_DIRECTIONS_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        coordinates: points.map(p => [p.lng, p.lat]),
-        units: 'km',
-        language: 'en',
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coordinates: points.map(p => [p.lng, p.lat]), units: 'km', language: 'en' }),
     });
-
     if (!r.ok) throw new Error('ORS HTTP ' + r.status);
     const data = await r.json();
     const feature = data.features[0];
-    const summary = feature.properties.summary;
-    const segments = feature.properties.segments;
-
     const result = {
-      totalKm: summary.distance.toFixed(1),
-      legs: segments.map(s => ({ km: s.distance.toFixed(1) })),
+      totalKm: feature.properties.summary.distance.toFixed(1),
+      legs: feature.properties.segments.map(s => ({ km: s.distance.toFixed(1) })),
       geometry: feature.geometry.coordinates,
       way_points: feature.properties.way_points,
       source: 'ors',
     };
-
     localStorage.setItem(cacheKey, JSON.stringify(result));
     applyRouteResult(result, points);
     return;
-  } catch (e) {
-    console.warn('ORS failed, falling back to OSRM:', e);
-  }
+  } catch (e) { console.warn('ORS failed, OSRM fallback:', e); }
 
   try {
     const coords = points.map(p => `${p.lng},${p.lat}`).join(';');
@@ -972,61 +814,41 @@ async function calculateRoute() {
         const route = data.routes[0];
         const geometry = route.geometry.coordinates;
         const wayPoints = points.map(p => findNearestIndex(geometry, p));
-
         const result = {
           totalKm: (route.distance / 1000).toFixed(1),
           legs: route.legs.map(l => ({ km: (l.distance / 1000).toFixed(1) })),
-          geometry: geometry,
-          way_points: wayPoints,
-          source: 'osrm-fallback',
+          geometry: geometry, way_points: wayPoints, source: 'osrm-fallback',
         };
         localStorage.setItem(cacheKey, JSON.stringify(result));
         applyRouteResult(result, points);
         return;
       }
     }
-  } catch (e) {
-    console.warn('OSRM also failed, using Haversine fallback', e);
-  }
+  } catch (e) { console.warn('OSRM failed, Haversine fallback', e); }
 
-  let totalKm = 0;
-  const legs = [];
+  let totalKm = 0; const legs = [];
   for (let i = 0; i < points.length - 1; i++) {
     const d = haversineLocal(points[i].lat, points[i].lng, points[i+1].lat, points[i+1].lng) * 1.3;
-    totalKm += d;
-    legs.push({ km: d.toFixed(1) });
+    totalKm += d; legs.push({ km: d.toFixed(1) });
   }
-  applyRouteResult({
-    totalKm: totalKm.toFixed(1),
-    legs,
-    geometry: points.map(p => [p.lng, p.lat]),
-    way_points: points.map((_, i) => i),
-    approximate: true,
-  }, points);
+  applyRouteResult({ totalKm: totalKm.toFixed(1), legs, geometry: points.map(p => [p.lng, p.lat]), way_points: points.map((_, i) => i), approximate: true }, points);
 }
 
 function applyRouteResult(result, points) {
   const kmEl = document.getElementById('routeTotalKm');
   const breakdown = document.getElementById('routeLegsBreakdown');
-
   kmEl.textContent = `${result.totalKm} km`;
 
   let sourceLabel = '';
-  if (result.approximate) {
-    sourceLabel = '<div style="color:#c05621; font-size:11px; margin-top:6px;">⚠️ Approximate (offline mode)</div>';
-  } else if (result.source === 'osrm-fallback') {
-    sourceLabel = '<div style="color:#c05621; font-size:11px; margin-top:6px;">ℹ️ OSRM fallback (ORS unavailable)</div>';
-  } else {
-    sourceLabel = '<div style="color:#16a34a; font-size:11px; margin-top:6px;">✓ Powered by OpenRouteService</div>';
-  }
+  if (result.approximate) sourceLabel = '<div style="color:#c05621; font-size:12px; margin-top:8px; font-weight:600;">⚠️ Approximate (offline mode)</div>';
+  else if (result.source === 'osrm-fallback') sourceLabel = '<div style="color:#c05621; font-size:12px; margin-top:8px; font-weight:600;">ℹ️ OSRM fallback (ORS unavailable)</div>';
+  else sourceLabel = '<div style="color:#16a34a; font-size:12px; margin-top:8px; font-weight:600;">✓ Powered by OpenRouteService</div>';
 
   breakdown.innerHTML = result.legs.map((leg, i) => {
-    const from = points[i];
-    const to = points[i+1];
-    const color = legColor(i);
-    return `<div style="display:flex; align-items:center; gap:6px;">
-      <span style="display:inline-block; width:14px; height:4px; background:${color}; border-radius:2px; flex-shrink:0;"></span>
-      <span>${i+1}. ${shorten(from.name)} → ${shorten(to.name)}: <b>${leg.km} km</b></span>
+    const from = points[i]; const to = points[i+1];
+    return `<div style="display:flex; align-items:center; gap:8px;">
+      <span style="display:inline-block; width:16px; height:5px; background:${legColor(i)}; border-radius:3px; flex-shrink:0;"></span>
+      <span style="font-weight:500;">${i+1}. ${shorten(from.name)} → ${shorten(to.name)}: <b style="color:var(--text-main);">${leg.km} km</b></span>
     </div>`;
   }).join('') + sourceLabel;
 
@@ -1034,60 +856,28 @@ function applyRouteResult(result, points) {
   drawPlannerRoute(result.geometry, points);
 }
 
-function shorten(name) {
-  return name.length > 26 ? name.slice(0, 24) + '…' : name;
-}
-
-function haversineLocal(lat1, lng1, lat2, lng2) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-
-function findNearestIndex(geometry, point) {
-  let minDist = Infinity, minIdx = 0;
-  for (let i = 0; i < geometry.length; i++) {
-    const [lng, lat] = geometry[i];
-    const d = (lng - point.lng) ** 2 + (lat - point.lat) ** 2;
-    if (d < minDist) { minDist = d; minIdx = i; }
-  }
-  return minIdx;
-}
+function shorten(name) { return name.length > 26 ? name.slice(0, 24) + '…' : name; }
+function haversineLocal(lat1, lng1, lat2, lng2) { const R = 6371; const dLat = (lat2 - lat1) * Math.PI / 180; const dLng = (lng2 - lng1) * Math.PI / 180; const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2; return 2 * R * Math.asin(Math.sqrt(a)); }
+function findNearestIndex(geometry, point) { let minDist = Infinity, minIdx = 0; for (let i = 0; i < geometry.length; i++) { const [lng, lat] = geometry[i]; const d = (lng - point.lng) ** 2 + (lat - point.lat) ** 2; if (d < minDist) { minDist = d; minIdx = i; } } return minIdx; }
 
 // ============================================================
 // DRAW PLANNER ROUTE
 // ============================================================
 function drawPlannerRoute(geojsonCoords, points) {
   clearPlannerMap();
-
   const path = convertOrsGeometry(geojsonCoords);
   const wayPoints = window.__lastWayPoints || null;
 
   if (wayPoints && wayPoints.length === points.length) {
     for (let i = 0; i < points.length - 1; i++) {
-      const startIdx = wayPoints[i];
-      const endIdx = wayPoints[i + 1];
-      const legPath = path.slice(startIdx, endIdx + 1);
+      const legPath = path.slice(wayPoints[i], wayPoints[i + 1] + 1);
       if (legPath.length < 2) continue;
-
-      const color = legColor(i);
-      const line = L.polyline(legPath, {
-        color: color, weight: 6, opacity: 0.9, lineJoin: 'round',
-      }).addTo(map);
-
-      line.bindTooltip(
-        `<b>Leg ${i + 1}</b><br>${points[i].name}<br>→ ${points[i + 1].name}`,
-        { sticky: true }
-      );
-
+      const line = L.polyline(legPath, { color: legColor(i), weight: 6, opacity: 0.9, lineJoin: 'round' }).addTo(map);
+      line.bindTooltip(`<b>Leg ${i + 1}</b><br>${points[i].name}<br>→ ${points[i + 1].name}`, { sticky: true });
       plannerMarkers.push(line);
     }
   } else {
-    plannerRouteLine = L.polyline(path, {
-      color: 'var(--accent-purple)', weight: 5, opacity: 0.9, lineJoin: 'round',
-    }).addTo(map);
+    plannerRouteLine = L.polyline(path, { color: '#7c3aed', weight: 5, opacity: 0.9, lineJoin: 'round' }).addTo(map);
   }
 
   const uniquePoints = points.slice(0, -1);
@@ -1095,96 +885,59 @@ function drawPlannerRoute(geojsonCoords, points) {
     const isHub = p.id === selectedHub.id;
     const color = isHub ? '#dc2626' : legColor(i - 1);
     const label = isHub ? 'H' : String(i);
-    const icon = makeSpokeIcon(color, 30, label);
-    const m = L.marker([p.lat, p.lng], { icon: icon, zIndexOffset: 900 - i })
-      .addTo(map)
-      .bindPopup(`<b>${p.name}</b><br>${isHub ? 'Hub (start/end)' : 'Stop ' + i}`);
+    const m = L.marker([p.lat, p.lng], { icon: makeSpokeIcon(color, 32, label), zIndexOffset: 900 - i })
+      .addTo(map).bindPopup(`<b>${p.name}</b><br>${isHub ? 'Hub (start/end)' : 'Stop ' + i}`);
     plannerMarkers.push(m);
   });
 
-  if (path.length) {
-    const bounds = L.latLngBounds(path);
-    map.fitBounds(bounds, { padding: [50, 50] });
-  }
+  if (path.length) map.fitBounds(L.latLngBounds(path), { padding: [50, 50] });
 }
 
 // ============================================================
 // AUTO-OPTIMIZE — Local TSP solver
 // ============================================================
 document.getElementById('routeOptimizeBtn').addEventListener('click', () => {
-  if (!selectedHub || routeStops.length < 3) {
-    alert('Add at least 3 stops to optimize.');
-    return;
-  }
-
+  if (!selectedHub || routeStops.length < 3) { alert('Add at least 3 stops to optimize.'); return; }
   const btn = document.getElementById('routeOptimizeBtn');
   const originalText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '⚡ Optimizing…';
-
+  btn.disabled = true; btn.textContent = '⚡ Optimizing…';
   setTimeout(() => {
     try {
       const newOrder = localOptimizeRoute();
       routeStops = newOrder;
       localStorage.removeItem(`route_cache_ors_${[selectedHub.id, ...routeStops].join('_')}`);
-      renderRoute();
-      calculateRoute();
-    } catch (e) {
-      console.error('Local optimize failed:', e);
-      alert('Could not optimize: ' + e.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = originalText;
-    }
+      renderRoute(); calculateRoute();
+    } catch (e) { alert('Could not optimize: ' + e.message); }
+    finally { btn.disabled = false; btn.textContent = originalText; }
   }, 50);
 });
 
 function localOptimizeRoute() {
   const hub = selectedHub;
   const stops = routeStops.map(id => SPOKES.find(s => s.id === id));
-
   const d = (a, b) => haversineLocal(a.lat, a.lng, b.lat, b.lng);
-
   const visited = new Set();
-  let current = hub;
-  const tour = [];
+  let current = hub; const tour = [];
   while (tour.length < stops.length) {
     let nearest = null, nearestDist = Infinity;
-    for (const s of stops) {
-      if (visited.has(s.id)) continue;
-      const dd = d(current, s);
-      if (dd < nearestDist) { nearestDist = dd; nearest = s; }
-    }
-    tour.push(nearest);
-    visited.add(nearest.id);
-    current = nearest;
+    for (const s of stops) { if (visited.has(s.id)) continue; const dd = d(current, s); if (dd < nearestDist) { nearestDist = dd; nearest = s; } }
+    tour.push(nearest); visited.add(nearest.id); current = nearest;
   }
-
   const fullTour = [hub, ...tour, hub];
-  let improved = true;
-  let passes = 0;
-
+  let improved = true, passes = 0;
   while (improved && passes < 100) {
-    improved = false;
-    passes++;
+    improved = false; passes++;
     for (let i = 0; i < fullTour.length - 2; i++) {
       for (let j = i + 2; j < fullTour.length - 1; j++) {
         const a = fullTour[i], b = fullTour[i + 1], c = fullTour[j], e = fullTour[j + 1];
-        const currentDist = d(a, b) + d(c, e);
-        const newDist = d(a, c) + d(b, e);
-        if (newDist < currentDist - 0.01) {
+        if (d(a, c) + d(b, e) < d(a, b) + d(c, e) - 0.01) {
           let left = i + 1, right = j;
-          while (left < right) {
-            [fullTour[left], fullTour[right]] = [fullTour[right], fullTour[left]];
-            left++;
-            right--;
-          }
+          while (left < right) { [fullTour[left], fullTour[right]] = [fullTour[right], fullTour[left]]; left++; right--; }
           improved = true;
         }
       }
     }
   }
-
   return fullTour.slice(1, -1).map(s => s.id);
 }
 
@@ -1196,160 +949,65 @@ document.getElementById('routeSaveBtn').addEventListener('click', () => {
   const name = prompt('Name this route (e.g., "Monday Forbesganj"):');
   if (!name) return;
   const routes = JSON.parse(localStorage.getItem('savedRoutes') || '{}');
-  const key = `${selectedHub.id}::${name}`;
-  routes[key] = {
-    hubId: selectedHub.id, hubName: selectedHub.name, name,
-    stops: routeStops.slice(), savedAt: new Date().toISOString(),
-  };
+  routes[`${selectedHub.id}::${name}`] = { hubId: selectedHub.id, hubName: selectedHub.name, name, stops: routeStops.slice(), savedAt: new Date().toISOString() };
   localStorage.setItem('savedRoutes', JSON.stringify(routes));
-  renderRoute();
-  alert(`Route "${name}" saved.`);
+  renderRoute(); alert(`Route "${name}" saved.`);
 });
 
 function loadRoute(key) {
-  const routes = JSON.parse(localStorage.getItem('savedRoutes') || '{}');
-  const r = routes[key];
+  const r = JSON.parse(localStorage.getItem('savedRoutes') || '{}')[key];
   if (!r) return;
   const hub = HUBS.find(h => h.id === r.hubId);
   if (!hub) return;
-  districtSel.value = hub.district;
-  districtSel.dispatchEvent(new Event('change'));
+  districtSel.value = hub.district; districtSel.dispatchEvent(new Event('change'));
   setTimeout(() => {
-    hubSel.value = r.hubId;
-    hubSel.dispatchEvent(new Event('change'));
-    setTimeout(() => {
-      routeStops = r.stops.slice();
-      renderRoute();
-      calculateRoute();
-      switchTab('route');
-    }, 100);
+    hubSel.value = r.hubId; hubSel.dispatchEvent(new Event('change'));
+    setTimeout(() => { routeStops = r.stops.slice(); renderRoute(); calculateRoute(); switchTab('route'); }, 100);
   }, 100);
 }
 
 // ============================================================
-// EXPORT CSV
+// EXPORT CSV & PRINT
 // ============================================================
 document.getElementById('routeExportBtn').addEventListener('click', () => {
   if (!selectedHub || routeStops.length === 0) return;
   const points = [selectedHub, ...routeStops.map(id => SPOKES.find(s => s.id === id)), selectedHub];
   const rows = [['Order', 'Name', 'Type', 'Block', 'District', 'Lat', 'Lng']];
   points.forEach((p, i) => {
-    const label = i === 0 ? 'START' : (i === points.length - 1 ? 'END' : String(i));
-    rows.push([label, p.name, p.type || 'Hub', p.block || '', p.district, p.lat, p.lng]);
+    rows.push([i === 0 ? 'START' : (i === points.length - 1 ? 'END' : String(i)), p.name, p.type || 'Hub', p.block || '', p.district, p.lat, p.lng]);
   });
   const csv = rows.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(',')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `route_${selectedHub.id}_${Date.now()}.csv`;
-  a.click();
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `route_${selectedHub.id}_${Date.now()}.csv`; a.click();
 });
 
-// ============================================================
-// PRINT DRIVER SHEET
-// ============================================================
 document.getElementById('routePrintBtn').addEventListener('click', () => {
   if (!selectedHub || routeStops.length === 0) return;
-
   const points = [selectedHub, ...routeStops.map(id => SPOKES.find(s => s.id === id)), selectedHub];
-  const totalKm = document.getElementById('routeTotalKm').textContent;
-
   const printWin = window.open('', '_blank');
   const dateStr = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-
-  let html = `<!DOCTYPE html><html><head><title>Runner Sheet - ${dateStr}</title>
-    <style>
-      body { font-family: Arial, sans-serif; padding: 24px; max-width: 850px; margin: 0 auto; color: #1a202c; }
-      h1 { font-size: 20px; border-bottom: 3px solid #7c3aed; padding-bottom: 10px; color: #553c9a; }
-      .meta { font-size: 13px; color: #4a5568; margin-bottom: 20px; padding: 10px; background: #faf5ff; border-radius: 6px; }
-      .meta b { color: #1a202c; }
-      table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 16px; }
-      th { background: #f0f0f0; padding: 10px; text-align: left; border: 1px solid #ccc; font-size: 12px; text-transform: uppercase; }
-      td { padding: 10px; border: 1px solid #ccc; }
-      .hub-row { background: #fff5f5; font-weight: bold; }
-      .stop-num { color: white; padding: 3px 9px; border-radius: 50%; font-size: 12px; font-weight: bold; display: inline-block; min-width: 22px; text-align: center; }
-      .signature { margin-top: 30px; padding-top: 16px; border-top: 2px dashed #999; font-size: 12px; line-height: 2; }
-      .signature b { display: inline-block; min-width: 130px; }
-      .no-print { margin-top: 20px; padding: 12px 24px; font-size: 14px; cursor: pointer; background: #7c3aed; color: #fff; border: none; border-radius: 6px; font-weight: 600; }
-      @media print { .no-print { display: none; } }
-    </style></head><body>
-    <h1>🧪 Sample Collection Route Sheet</h1>
-    <div class="meta">
-      <b>Date:</b> ${dateStr}<br>
-      <b>Hub:</b> ${selectedHub.name}<br>
-      <b>District:</b> ${selectedHub.district}<br>
-      <b>Total Stops:</b> ${routeStops.length} spokes + hub &nbsp;·&nbsp; <b>Total Distance:</b> ${totalKm}
-    </div>
-    <table>
-      <thead><tr><th style="width:50px;">#</th><th>Facility</th><th style="width:70px;">Type</th><th style="width:130px;">Block</th><th style="width:60px;">Samples</th></tr></thead>
-      <tbody>`;
-
+  let html = `<!DOCTYPE html><html><head><title>Runner Sheet - ${dateStr}</title><style>body{font-family:Arial,sans-serif;padding:24px;max-width:850px;margin:0 auto;color:#1a202c;}h1{font-size:20px;border-bottom:3px solid #7c3aed;padding-bottom:10px;color:#553c9a;}.meta{font-size:13px;color:#4a5568;margin-bottom:20px;padding:10px;background:#faf5ff;border-radius:6px;}table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;}th{background:#f0f0f0;padding:10px;text-align:left;border:1px solid #ccc;font-size:12px;text-transform:uppercase;}td{padding:10px;border:1px solid #ccc;}.hub-row{background:#fff5f5;font-weight:bold;}.stop-num{color:white;padding:3px 9px;border-radius:50%;font-size:12px;font-weight:bold;display:inline-block;min-width:22px;text-align:center;}.signature{margin-top:30px;padding-top:16px;border-top:2px dashed #999;font-size:12px;line-height:2;}.signature b{display:inline-block;min-width:130px;}.no-print{margin-top:20px;padding:12px 24px;font-size:14px;cursor:pointer;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-weight:600;}@media print{.no-print{display:none;}}</style></head><body><h1>🧪 Sample Collection Route Sheet</h1><div class="meta"><b>Date:</b> ${dateStr}<br><b>Hub:</b> ${selectedHub.name}<br><b>District:</b> ${selectedHub.district}<br><b>Total Stops:</b> ${routeStops.length} spokes + hub &nbsp;·&nbsp; <b>Total Distance:</b> ${document.getElementById('routeTotalKm').textContent}</div><table><thead><tr><th style="width:50px;">#</th><th>Facility</th><th style="width:70px;">Type</th><th style="width:130px;">Block</th><th style="width:60px;">Samples</th></tr></thead><tbody>`;
   points.forEach((p, i) => {
     const isHub = p.id === selectedHub.id;
-    const isFirstOrLast = i === 0 || i === points.length - 1;
-    let label;
-    if (isHub && isFirstOrLast) label = i === 0 ? 'START' : 'END';
-    else if (isHub) label = 'H';
-    else label = i;
-    const cls = isHub ? 'hub-row' : '';
+    const label = isHub ? (i === 0 ? 'START' : 'END') : i;
     const color = isHub ? '#dc2626' : legColor(i - 1);
-    html += `<tr class="${cls}">
-      <td><span class="stop-num" style="background:${color};">${label}</span></td>
-      <td>${p.name}</td><td>${p.type || 'Hub'}</td><td>${p.block || ''}</td><td></td>
-    </tr>`;
+    html += `<tr class="${isHub ? 'hub-row' : ''}"><td><span class="stop-num" style="background:${color};">${label}</span></td><td>${p.name}</td><td>${p.type || 'Hub'}</td><td>${p.block || ''}</td><td></td></tr>`;
   });
-
-  html += `</tbody></table>
-    <div class="signature">
-      <b>Runner Name:</b> _______________________________<br>
-      <b>Departure Time:</b> ____________________________<br>
-      <b>Return Time:</b> _______________________________<br>
-      <b>Total Samples Collected:</b> ___________________<br>
-      <b>Runner Signature:</b> __________________________<br>
-      <b>Supervisor Signature:</b> ______________________
-    </div>
-    <button class="no-print" onclick="window.print()">🖨️ Print This Sheet</button>
-    </body></html>`;
-
-  printWin.document.write(html);
-  printWin.document.close();
+  html += `</tbody></table><div class="signature"><b>Runner Name:</b> _______________________________<br><b>Departure Time:</b> ____________________________<br><b>Return Time:</b> _______________________________<br><b>Total Samples Collected:</b> ___________________<br><b>Runner Signature:</b> __________________________<br><b>Supervisor Signature:</b> ______________________</div><button class="no-print" onclick="window.print()">🖨️ Print This Sheet</button></body></html>`;
+  printWin.document.write(html); printWin.document.close();
 });
 
 // ============================================================
-// CLEANUP
+// CLEANUP & ERROR BOUNDARY
 // ============================================================
-function clearSpokes() {
-  spokeSel.innerHTML = '';
-  spokeSel.disabled = true;
-  typeFilter.innerHTML = '<option>All types</option>';
-  typeFilter.disabled = true;
-  currentSpokes = [];
-  spokeCount.textContent = '';
-}
-function clearResult() {
-  emptyMsg.style.display = 'block';
-  tabsWrap.style.display = 'none';
-  detailsView.style.display = 'none';
-  tableView.style.display = 'none';
-  routeView.style.display = 'none';
-  hubDistanceView.style.display = 'none';
-  spokeDistanceView.style.display = 'none';
-  currentSpoke = null;
-}
+function clearSpokes() { spokeSel.innerHTML = ''; spokeSel.disabled = true; typeFilter.innerHTML = '<option>All types</option>'; typeFilter.disabled = true; currentSpokes = []; spokeCount.textContent = ''; }
+function clearResult() { emptyMsg.style.display = 'block'; tabsWrap.style.display = 'none'; detailsView.style.display = 'none'; tableView.style.display = 'none'; routeView.style.display = 'none'; hubDistanceView.style.display = 'none'; spokeDistanceView.style.display = 'none'; currentSpoke = null; }
 
-// ============================================================
-// ERROR BOUNDARY
-// ============================================================
 window.addEventListener('error', (e) => {
   console.error('App error:', e.error || e.message);
   const box = document.getElementById('errorBox');
-  if (box) {
-    box.style.display = 'block';
-    box.textContent = 'Something went wrong. Try refreshing the page (Ctrl + F5).';
-  }
+  if (box) { box.style.display = 'block'; box.textContent = 'Something went wrong. Try refreshing the page (Ctrl + F5).'; }
 });
 
-console.log('Districts:', DISTRICTS.length);
-console.log('Hubs:', HUBS.length);
-console.log('Spokes:', SPOKES.length);
-console.log('Tabs: Details, All Spokes, Route Planner, Nearest Hubs, Spoke Distances');
+console.log('UI Updated: Professional Clinical Theme + Ambient Dark Mode');

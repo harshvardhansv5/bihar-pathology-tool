@@ -38,8 +38,20 @@ function initMapTiles(theme) {
   tileLayer = L.tileLayer(url, { attribution, maxZoom: 19 }).addTo(map);
 }
 
-map = L.map('map').setView([25.6, 85.5], 7);
-initMapTiles(currentTheme);
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    map = L.map('map').setView([25.6, 85.5], 7);
+    initMapTiles(currentTheme);
+    console.log("Map initialized successfully.");
+  } catch (error) {
+    console.error("Map initialization failed:", error);
+    const box = document.getElementById('errorBox');
+    if (box) {
+      box.style.display = 'block';
+      box.textContent = 'Map failed to load. Please refresh the page (Ctrl + F5).';
+    }
+  }
+});
 
 themeToggle.addEventListener('click', () => {
   const newTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';

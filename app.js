@@ -42,7 +42,6 @@ document.addEventListener('DOMContentLoaded', () => {
   try {
     map = L.map('map').setView([25.6, 85.5], 7);
     initMapTiles(currentTheme);
-    console.log("Map initialized successfully.");
   } catch (error) {
     console.error("Map initialization failed:", error);
     const box = document.getElementById('errorBox');
@@ -58,11 +57,11 @@ themeToggle.addEventListener('click', () => {
   document.documentElement.setAttribute('data-theme', newTheme);
   localStorage.setItem('theme', newTheme);
   themeToggle.textContent = newTheme === 'dark' ? '☀️ Light' : '🌙 Dark';
-  initMapTiles(newTheme);
+  if (map) initMapTiles(newTheme);
 });
 
 // ============================================================
-// MAP ICONS
+// MAP ICONS & LEGEND
 // ============================================================
 const hubIcon = L.divIcon({
   className: '',
@@ -277,7 +276,7 @@ spokeSel.addEventListener('change', (e) => {
 });
 
 // ============================================================
-// SHOW RESULT
+// SHOW RESULT (MODERNIZED)
 // ============================================================
 function showResult(spoke) {
   currentSpoke = spoke;
@@ -288,7 +287,6 @@ function showResult(spoke) {
   const spokeDists = DISTANCES[spoke.id] || {};
   const assigned = spokeDists[spoke.parent];
   
-  // Update Distance Card
   const distCard = document.getElementById('distCard');
   if (distCard) {
     if (assigned) {
@@ -297,7 +295,6 @@ function showResult(spoke) {
       distCard.innerHTML = `<div class="label">Driving Distance</div><div class="value">—</div>`;
     }
   } else {
-    // Fallback if old HTML structure exists
     document.getElementById('distVal').textContent = assigned ? assigned.km : '—';
   }
 
@@ -308,7 +305,6 @@ function showResult(spoke) {
   const nearbyList = document.getElementById('nearbyList');
   nearbyList.innerHTML = '';
   
-  // Take top 6 and find max distance for bar scaling
   const displayHubs = all.slice(0, 6);
   const maxKm = Math.max(...displayHubs.map(h => h.km), 1);
 
@@ -337,27 +333,7 @@ function showResult(spoke) {
   highlightTableRow(spoke.id);
   const assignedHub = HUBS.find(h => h.id === spoke.parent);
   if (assignedHub) drawRoute(spoke, assignedHub);
-}
-
-  const all = Object.entries(spokeDists)
-    .map(([hubId, d]) => ({ hubId, ...d, hub: HUBS.find(h => h.id === hubId) }))
-    .filter(x => x.hub).sort((a, b) => a.km - b.km);
-
-  const nearbyList = document.getElementById('nearbyList');
-  nearbyList.innerHTML = '';
-  all.slice(0, 6).forEach(item => {
-    const isAssigned = item.hubId === spoke.parent;
-    const div = document.createElement('div');
-    div.className = 'hub-item' + (isAssigned ? ' assigned' : '');
-    div.innerHTML = `<div><span class="hub-name">${item.hub.name}</span>${isAssigned ? '<span class="hub-badge">Assigned</span>' : ''}</div>
-      <div class="hub-dist">${item.km} km</div>`;
-    div.addEventListener('click', () => drawRoute(spoke, item.hub));
-    nearbyList.appendChild(div);
-  });
-  highlightTableRow(spoke.id);
-  const assignedHub = HUBS.find(h => h.id === spoke.parent);
-  if (assignedHub) drawRoute(spoke, assignedHub);
-}
+} // <-- THIS IS THE CLOSING BRACE THAT WAS LIKELY MISSING OR DUPLICATED
 
 // ============================================================
 // MAP DRAW
@@ -1067,5 +1043,3 @@ window.addEventListener('error', (e) => {
   const box = document.getElementById('errorBox');
   if (box) { box.style.display = 'block'; box.textContent = 'Something went wrong. Try refreshing the page (Ctrl + F5).'; }
 });
-
-console.log('UI Updated: Professional Clinical Theme + Ambient Dark Mode');

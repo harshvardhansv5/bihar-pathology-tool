@@ -4,9 +4,7 @@
 
 // OpenRouteService API Key (free, no credit card)
 // NOTE: This will be moved to a secure Cloudflare Worker in the next step.
-const ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6Ijg5MmQzMWE1NzI5OTQyMmM4NDAwYTJjYmM4OTczMzEzIiwiaCI6Im11cm11cjY0In0=";
-
-const ORS_BASE = 'https://api.heigit.org/openrouteservice';
+const ORS_BASE = 'https://bihar-pathology-proxy.harshvardhansv5.workers.dev/api';
 const ORS_DIRECTIONS_URL = `${ORS_BASE}/v2/directions/driving-car/geojson`;
 const ORS_MATRIX_URL = `${ORS_BASE}/v2/matrix/driving-car`;
 
@@ -484,7 +482,6 @@ async function renderHubDistances() {
     const r = await fetch(ORS_MATRIX_URL, {
       method: 'POST',
       headers: {
-        'Authorization': ORS_API_KEY,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -686,7 +683,6 @@ document.getElementById('spokeCalcBtn').addEventListener('click', async () => {
     const r = await fetch(ORS_DIRECTIONS_URL, {
       method: 'POST',
       headers: {
-        'Authorization': ORS_API_KEY,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -944,7 +940,6 @@ async function calculateRoute() {
     const r = await fetch(ORS_DIRECTIONS_URL, {
       method: 'POST',
       headers: {
-        'Authorization': ORS_API_KEY,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({

@@ -94,8 +94,6 @@ legend.onAdd = function () {
   `;
   return div;
 };
-// NOTE: legend.addTo(map) is called inside the DOMContentLoaded handler above,
-// after the map exists. Do NOT call it here at module level.
 
 // ============================================================
 // DOM
@@ -284,7 +282,9 @@ function showResult(spoke) {
   currentSpoke = spoke;
   emptyMsg.style.display = 'none';
   tabsWrap.style.display = 'block';
-  document.getElementById('spokeTitle').textContent = spoke.name;
+  
+  const titleEl = document.getElementById('spokeTitle');
+  if (titleEl) titleEl.textContent = spoke.name;
 
   const spokeDists = DISTANCES[spoke.id] || {};
   const assigned = spokeDists[spoke.parent];

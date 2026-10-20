@@ -27,13 +27,15 @@ let map, tileLayer, markerHub, markerSpoke, routeLine, spokeMarkersLayer, planne
 
 function initMapTiles(theme) {
   if (tileLayer) map.removeLayer(tileLayer);
+  
+  // Fix: Use Esri Dark Gray Canvas for dark mode and OSM for light mode (both free, no API key)
   const url = theme === 'dark' 
-    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}';
+    ? 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'
+    : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
   
   const attribution = theme === 'dark'
-    ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-    : '© Esri, HERE, Garmin, © OpenStreetMap contributors';
+    ? '© Esri, HERE, Garmin, © OpenStreetMap contributors'
+    : '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
   tileLayer = L.tileLayer(url, { attribution, maxZoom: 19 }).addTo(map);
 }

@@ -42,6 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
   try {
     map = L.map('map').setView([25.6, 85.5], 7);
     initMapTiles(currentTheme);
+    legend.addTo(map);
   } catch (error) {
     console.error("Map initialization failed:", error);
     const box = document.getElementById('errorBox');
@@ -93,7 +94,8 @@ legend.onAdd = function () {
   `;
   return div;
 };
-legend.addTo(map);
+// NOTE: legend.addTo(map) is called inside the DOMContentLoaded handler above,
+// after the map exists. Do NOT call it here at module level.
 
 // ============================================================
 // DOM
@@ -333,7 +335,7 @@ function showResult(spoke) {
   highlightTableRow(spoke.id);
   const assignedHub = HUBS.find(h => h.id === spoke.parent);
   if (assignedHub) drawRoute(spoke, assignedHub);
-} // <-- THIS IS THE CLOSING BRACE THAT WAS LIKELY MISSING OR DUPLICATED
+}
 
 // ============================================================
 // MAP DRAW
